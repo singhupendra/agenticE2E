@@ -1,8 +1,9 @@
+import type { ModelInfo, ProviderId } from '../../src/core/llm/models';
 import type { HealRecord, Journey, ProgressEvent, ScreenshotMode } from '../../src/core/types';
 
 export interface Settings {
   screenshots: ScreenshotMode; fullPage: boolean; maxJourneys: number; maxPages: number; maxDepth: number;
-  healAttempts: number; model: string; requireApproval: boolean; include: string[]; exclude: string[]; headless: boolean;
+  healAttempts: number; provider: ProviderId; model: string; requireApproval: boolean; include: string[]; exclude: string[]; headless: boolean;
 }
 export interface SiteSummary { id: string; origin: string; url: string; journeys: number; tests: number; runs: number; lastRun: { id: string; passed: number; total: number } | null }
 export interface RunSummary { id: string; kind: string; startedAt: string; screenshots: string; results: { journeyId: string; status: string }[] }
@@ -22,6 +23,7 @@ const post = (url: string, body: unknown) => fetch(url, { method: 'POST', header
 
 export const api = {
   config: () => fetch('/api/config').then((r) => j<Settings>(r)),
+  models: (provider: ProviderId) => fetch(`/api/models?provider=${provider}`).then((r) => j<{ provider: ProviderId; models: ModelInfo[] }>(r)),
   sites: () => fetch('/api/sites').then((r) => j<SiteSummary[]>(r)),
   site: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}`).then((r) => j<SiteDetail>(r)),
   test: (id: string, t: string) => fetch(`/api/sites/${encodeURIComponent(id)}/tests/${encodeURIComponent(t)}`).then((r) => j<TestDetail>(r)),

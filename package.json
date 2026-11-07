@@ -20,6 +20,7 @@
     "test:run": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^1.1.1",
     "@anthropic-ai/sdk": "^1.6.0",
     "@fastify/static": "^10.1.10",
     "@playwright/test": "^1.65.0",

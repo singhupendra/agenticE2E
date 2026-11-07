@@ -49,4 +49,23 @@ describe('config', () => {
     const c = resolveConfig({ cli: { dataDir: 'x/y' }, cwd: '/tmp/base' });
     expect(c.dataDir).toBe('/tmp/base/x/y');
   });
+
+  it('SPEC-002 AC-1: provider defaults to anthropic', () => {
+    const c = resolveConfig({});
+    expect(c.provider).toBe('anthropic');
+    expect(c.awsRegion).toBeUndefined();
+  });
+
+  it('SPEC-002 AC-2: provider precedence file < env < cli', () => {
+    const e = resolveConfig({ file: { provider: 'anthropic' }, env: { AGENTIC_E2E_PROVIDER: 'bedrock', AGENTIC_E2E_AWS_REGION: 'us-east-1' }, cli: {} });
+    expect(e.provider).toBe('bedrock');
+    expect(e.awsRegion).toBe('us-east-1');
+    expect(resolveConfig({ file: { provider: 'anthropic' }, env: { AGENTIC_E2E_PROVIDER: 'bedrock' }, cli: { provider: 'anthropic' } }).provider).toBe('anthropic');
+  });
+
+  it('SPEC-002 AC-3/4: rejects unknown provider and unsafe region', () => {
+    expect(() => resolveConfig({ cli: { provider: 'openai' as never } })).toThrow(/provider/);
+    for (const r of ['us-east-1; evil', '../x', 'evil.com/x', 'US-EAST-1']) expect(() => resolveConfig({ cli: { awsRegion: r } })).toThrow(/awsRegion/);
+    for (const r of ['us-east-1', 'ap-southeast-1', 'eu-central-2']) expect(resolveConfig({ cli: { awsRegion: r } }).awsRegion).toBe(r);
+  });
 });

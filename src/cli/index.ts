@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { Command } from 'commander';
 import { loadConfig, type PartialConfig, type Config } from '../core/config.js';
 import { parseJourneys, setStatus } from '../core/journeys.js';
+import { listModels, resolveModelId, PROVIDERS, type ProviderId } from '../core/llm/models.js';
 import { createContext, discover, generate, heal, run, runAll, type Context } from '../core/pipeline.js';
 import { Store, normalizeSite } from '../core/storage.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
@@ -19,7 +20,9 @@ function addCommon(cmd: Command): Command {
     .option('--screenshots <mode>', 'off | on-failure | every-step | end-of-journey')
     .option('--full-page', 'take full-page screenshots')
     .option('--headed', 'run browsers headed')
-    .option('--model <id>', 'LLM model id')
+    .option('--provider <name>', 'LLM provider: anthropic | bedrock')
+    .option('--model <id>', 'LLM model id (see `models`)')
+    .option('--aws-region <region>', 'AWS region for --provider bedrock (default: AWS_REGION)')
     .option('--max-pages <n>', 'max pages to crawl', num)
     .option('--max-depth <n>', 'max crawl depth', num)
     .option('--max-journeys <n>', 'max journeys to automate', num)
@@ -35,7 +38,9 @@ function cliConfig(o: Record<string, unknown>): PartialConfig {
     screenshots: o.screenshots as Config['screenshots'] | undefined,
     fullPage: o.fullPage ? true : undefined,
     headless: o.headed ? false : undefined,
+    provider: o.provider as Config['provider'] | undefined,
     model: o.model as string | undefined,
+    awsRegion: o.awsRegion as string | undefined,
     maxPages: o.maxPages as number | undefined,
     maxDepth: o.maxDepth as number | undefined,
     maxJourneys: o.maxJourneys as number | undefined,
@@ -154,6 +159,19 @@ export function buildProgram(setExit: (code: number) => void): Command {
       console.log('\nFinal:');
       for (const f of r.final) console.log(`  ${f.status === 'passed' ? '✔' : '✗'} ${f.journeyId} ${f.status}${f.healed ? ' (healed)' : ''}`);
       if (r.final.some((f) => f.status !== 'passed')) setExit(1);
+    });
+
+  program.command('models').description('list known Claude models for a provider')
+    .option('--provider <name>', 'anthropic | bedrock (default: configured provider)')
+    .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
+    .option('--data-dir <dir>')
+    .action(async (o) => {
+      const cfg = await loadConfig({ configFile: o.config, cli: cliConfig(o) });
+      if (!(PROVIDERS as readonly string[]).includes(cfg.provider)) throw new Error(`Unknown provider ${cfg.provider}`);
+      const provider: ProviderId = cfg.provider;
+      console.log(`Models for ${provider} (any other id can be passed to --model):`);
+      for (const m of listModels(provider)) console.log(`  ${m.id.padEnd(36)} ${m.label}${m.id === resolveModelId(provider, cfg.model) ? '   <- selected' : ''}`);
+      if (provider === 'bedrock') console.log('\nRegion: --aws-region / AGENTIC_E2E_AWS_REGION / AWS_REGION. Credentials: AWS default chain or AWS_BEARER_TOKEN_BEDROCK.');
     });
 
   program.command('list').description('list known sites').option('--data-dir <dir>').option('--config <file>').action(async (o) => {

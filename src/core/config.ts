@@ -1,11 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { PROVIDERS } from './llm/models.js';
 
 export const SCREENSHOT_MODES = ['off', 'on-failure', 'every-step', 'end-of-journey'] as const;
 
 export const configSchema = z.object({
+  provider: z.enum(PROVIDERS).default('anthropic'),
   model: z.string().min(1).default('claude-sonnet-5-5'),
+  /** Bedrock only. Interpolated into the endpoint host, so it must look like a region. */
+  awsRegion: z.string().regex(/^[a-z]{2}(-[a-z0-9]+)+-\d+$/, 'must look like an AWS region, e.g. us-east-1').optional(),
   maxTokens: z.number().int().positive().default(8000),
   screenshots: z.enum(SCREENSHOT_MODES).default('on-failure'),
   fullPage: z.boolean().default(false),
@@ -27,7 +31,9 @@ export type Config = z.infer<typeof configSchema>;
 export type PartialConfig = Partial<Config>;
 
 const ENV_MAP: Record<string, { key: keyof Config; parse: (v: string) => unknown }> = {
+  AGENTIC_E2E_PROVIDER: { key: 'provider', parse: String },
   AGENTIC_E2E_MODEL: { key: 'model', parse: String },
+  AGENTIC_E2E_AWS_REGION: { key: 'awsRegion', parse: String },
   AGENTIC_E2E_SCREENSHOTS: { key: 'screenshots', parse: String },
   AGENTIC_E2E_FULL_PAGE: { key: 'fullPage', parse: (v) => v === 'true' || v === '1' },
   AGENTIC_E2E_DATA_DIR: { key: 'dataDir', parse: String },

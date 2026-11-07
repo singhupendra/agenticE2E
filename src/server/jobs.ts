@@ -15,7 +15,7 @@ export interface Job {
 }
 
 /** Options a web client may override per job. dataDir/model-provider internals are deliberately excluded. */
-const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true }).partial().strict();
+const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true }).partial().strict();
 
 export function parseJobRequest(body: unknown): JobRequest {
   const b = (body ?? {}) as Record<string, unknown>;

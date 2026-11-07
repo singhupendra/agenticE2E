@@ -3,7 +3,7 @@ import { generateTests, type GenerateResult } from './codegen.js';
 import type { Config } from './config.js';
 import { crawl } from './discovery.js';
 import { healTest } from './healer.js';
-import { AnthropicProvider } from './llm/anthropic.js';
+import { createLLMProvider } from './llm/index.js';
 import type { LLMProvider } from './llm/types.js';
 import { proposeJourneys, selectJourneys } from './planner.js';
 import { runTests } from './runner.js';
@@ -23,7 +23,7 @@ export function createContext(opts: { config: Config; llm?: LLMProvider; onProgr
     config: opts.config,
     store: new Store(opts.config.dataDir),
     onProgress: opts.onProgress ?? (() => {}),
-    getLLM: () => (llm ??= new AnthropicProvider({ model: opts.config.model, maxTokens: opts.config.maxTokens })),
+    getLLM: () => (llm ??= createLLMProvider(opts.config)),
   };
 }
 

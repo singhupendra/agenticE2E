@@ -62,4 +62,15 @@ describe('cli', () => {
     expect(await cli('journeys', 'https://example.com', '--edit')).toBe(0);
     expect(s.loadJourneys('example.com')![0].name).toBe('Renamed');
   });
+
+  it('SPEC-002 AC-9: models lists the catalog per provider', async () => {
+    expect(await cli('models', '--provider', 'bedrock')).toBe(0);
+    expect(out.join('\n')).toContain('anthropic.claude-sonnet-5-5');
+    out.length = 0;
+    expect(await cli('models')).toBe(0);
+    expect(out.join('\n')).toContain('claude-sonnet-5-5');
+    expect(out.join('\n')).not.toContain('anthropic.claude');
+    expect(await cli('models', '--provider', 'nope')).toBe(1);
+    expect(err.join('\n')).toMatch(/provider/);
+  });
 });

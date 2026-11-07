@@ -29,6 +29,13 @@ describe('AnthropicProvider', () => {
     await expect(none.structured({ name: 't', description: 'd', system: 's', prompt: 'p', schema })).rejects.toThrow(/did not call tool/);
   });
 
+  it('SPEC-002 AC-13: auto tool_choice for models that reject forced tool use', async () => {
+    const f = fake([{ type: 'tool_use', name: 't', input: { code: 'x' } }]);
+    await new AnthropicProvider({ model: 'claude-opus-5-5', client: f.client }).structured({ name: 't', description: 'd', system: 's', prompt: 'p', schema });
+    expect(f.calls[0].tool_choice).toEqual({ type: 'auto' });
+    expect(f.calls[0].system).toMatch(/calling the `t` tool/i);
+  });
+
   it('requires an API key', () => {
     const old = process.env.ANTHROPIC_API_KEY; delete process.env.ANTHROPIC_API_KEY;
     expect(() => new AnthropicProvider({ model: 'm' })).toThrow(/ANTHROPIC_API_KEY/);
