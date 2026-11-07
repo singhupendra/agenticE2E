@@ -37,14 +37,17 @@ pnpm exec playwright install chromium     # browser used for crawling + tests
 # Anthropic (default)
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# ...or Amazon Bedrock
-export AWS_PROFILE=my-profile             # or any standard AWS credential source
+# ...or Amazon Bedrock, using a named AWS profile (access key + secret in ~/.aws/credentials, or SSO / assume-role in ~/.aws/config)
+agentic-e2e aws-profiles                  # list the profiles found on this machine
 export AGENTIC_E2E_PROVIDER=bedrock
-export AGENTIC_E2E_AWS_REGION=us-east-1   # or AWS_REGION
-# (if using SSO: `aws sso login --profile my-profile` first)
+export AGENTIC_E2E_AWS_PROFILE=my-profile # or --aws-profile my-profile, or `awsProfile` in the config file
+export AGENTIC_E2E_AWS_REGION=us-east-1   # optional if the profile sets `region`; else AWS_REGION
+# (if the profile uses SSO: `aws sso login --profile my-profile` first)
 ```
 
-Credentials are only needed when something actually calls the LLM (new discovery, code generation, healing failures — i.e. `discover`, `generate`, `heal`, `all` and the matching UI jobs). `run`, `journeys`, `list`, `models` and `serve` itself start without them. Provider/model can also be set per command with `--provider`, `--model`, `--aws-region` (see [Configuration](#configuration)).
+The selected profile is loaded when the app runs and is used even if `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or `AWS_BEARER_TOKEN_BEDROCK` are set. With no profile selected, the standard AWS credential chain applies as before. In the web UI (`serve`), choose the provider *Amazon Bedrock* in **Settings** and pick the **AWS profile** from the dropdown (it lists the profiles on the machine running the server; only names are shown, never keys).
+
+Credentials are only needed when something actually calls the LLM (new discovery, code generation, healing failures — i.e. `discover`, `generate`, `heal`, `all` and the matching UI jobs). `run`, `journeys`, `list`, `models` and `serve` itself start without them. Provider/model can also be set per command with `--provider`, `--model`, `--aws-region`, `--aws-profile` (see [Configuration](#configuration)).
 
 ### Build (optional)
 
@@ -94,10 +97,11 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `heal <url>` | run tests, then self-heal failures |
 | `all <url>` | discover → select → generate → run → heal |
 | `models` | list known Claude models for `--provider anthropic\|bedrock` |
+| `aws-profiles` | list AWS profiles from `~/.aws/config` / `~/.aws/credentials` for `--aws-profile` |
 | `list` | known sites with journey/test/run counts |
 | `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`) |
 
-Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`. Patterns are case-insensitive substrings, or `/regex/flags`.
+Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--aws-profile <name>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`. Patterns are case-insensitive substrings, or `/regex/flags`.
 
 Typical review-before-codegen workflow:
 
@@ -127,7 +131,8 @@ export default {
 |---|---|---|
 | `provider` | `anthropic` | `anthropic` \| `bedrock`; env `AGENTIC_E2E_PROVIDER`, flag `--provider` |
 | `model` | `claude-sonnet-5-5` | env `AGENTIC_E2E_MODEL`. Pick from `agentic-e2e models` or the UI dropdown, or give any id; on Bedrock bare ids get the `anthropic.` prefix |
-| `awsRegion` | – | Bedrock only; env `AGENTIC_E2E_AWS_REGION`, flag `--aws-region`, else `AWS_REGION` / `AWS_DEFAULT_REGION` |
+| `awsRegion` | – | Bedrock only; env `AGENTIC_E2E_AWS_REGION`, flag `--aws-region`, else the selected profile's `region`, else `AWS_REGION` / `AWS_DEFAULT_REGION` |
+| `awsProfile` | – | Bedrock only; named AWS profile supplying credentials; env `AGENTIC_E2E_AWS_PROFILE`, flag `--aws-profile`, or the UI dropdown. Unset = AWS default credential chain. An unknown name fails fast with the list of available profiles |
 | `maxTokens` | `8000` | per LLM response |
 | `screenshots` | `on-failure` | `off` \| `on-failure` \| `every-step` \| `end-of-journey`; env `AGENTIC_E2E_SCREENSHOTS` |
 | `fullPage` | `false` | full-page screenshots; env `AGENTIC_E2E_FULL_PAGE` |
@@ -152,7 +157,7 @@ Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), a
 
 > ⚠️ The server executes LLM-generated Playwright tests and spends API credits. It binds to `127.0.0.1` and rejects cross-origin mutating requests; do not expose it publicly or add auth-less port forwarding.
 
-REST API (all JSON): `GET /api/config`, `GET /api/sites`, `GET /api/sites/:site`, `PUT /api/sites/:site/journeys`, `GET /api/sites/:site/tests/:id`, `GET /api/sites/:site/runs/:runId`, `GET /api/sites/:site/files/(screenshots|runs)/…`, `POST /api/jobs` `{action, url, options?, journeyIds?, rediscover?, regenerate?}`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE).
+REST API (all JSON): `GET /api/config`, `GET /api/aws-profiles`, `GET /api/models`, `GET /api/sites`, `GET /api/sites/:site`, `PUT /api/sites/:site/journeys`, `GET /api/sites/:site/tests/:id`, `GET /api/sites/:site/runs/:runId`, `GET /api/sites/:site/files/(screenshots|runs)/…`, `POST /api/jobs` `{action, url, options?, journeyIds?, rediscover?, regenerate?}`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE).
 
 ## Data layout
 
@@ -172,7 +177,7 @@ data/sites/<host[_port]>/
 src/core    config · llm/{types,anthropic,mock,schemas} · storage · discovery · planner · journeys
             · validate · codegen · runner · healer · pipeline
 src/cli     commander front-end                 src/server  Fastify REST + SSE (+ serves web/dist)
-web/        Vite + React UI                     specs/      SPEC-001
+web/        Vite + React UI                     specs/      SPEC-001…003
 ```
 
 - **LLM layer**: `LLMProvider.structured({name, schema, prompt, images})`. The Anthropic provider forces a tool call whose `input_schema` is the zod schema's JSON Schema and re-validates the result. Implement the interface to plug in another provider; `MockLLM` is used by all tests.

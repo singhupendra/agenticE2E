@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { Command } from 'commander';
+import { listAwsProfiles } from '../core/aws-profiles.js';
 import { loadConfig, type PartialConfig, type Config } from '../core/config.js';
 import { parseJourneys, setStatus } from '../core/journeys.js';
 import { listModels, resolveModelId, PROVIDERS, type ProviderId } from '../core/llm/models.js';
@@ -22,7 +23,8 @@ function addCommon(cmd: Command): Command {
     .option('--headed', 'run browsers headed')
     .option('--provider <name>', 'LLM provider: anthropic | bedrock')
     .option('--model <id>', 'LLM model id (see `models`)')
-    .option('--aws-region <region>', 'AWS region for --provider bedrock (default: AWS_REGION)')
+    .option('--aws-region <region>', 'AWS region for --provider bedrock (default: the profile\'s region, then AWS_REGION)')
+    .option('--aws-profile <name>', 'AWS profile (see `aws-profiles`) that supplies credentials for --provider bedrock')
     .option('--max-pages <n>', 'max pages to crawl', num)
     .option('--max-depth <n>', 'max crawl depth', num)
     .option('--max-journeys <n>', 'max journeys to automate', num)
@@ -41,6 +43,7 @@ function cliConfig(o: Record<string, unknown>): PartialConfig {
     provider: o.provider as Config['provider'] | undefined,
     model: o.model as string | undefined,
     awsRegion: o.awsRegion as string | undefined,
+    awsProfile: o.awsProfile as string | undefined,
     maxPages: o.maxPages as number | undefined,
     maxDepth: o.maxDepth as number | undefined,
     maxJourneys: o.maxJourneys as number | undefined,
@@ -171,7 +174,20 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const provider: ProviderId = cfg.provider;
       console.log(`Models for ${provider} (any other id can be passed to --model):`);
       for (const m of listModels(provider)) console.log(`  ${m.id.padEnd(36)} ${m.label}${m.id === resolveModelId(provider, cfg.model) ? '   <- selected' : ''}`);
-      if (provider === 'bedrock') console.log('\nRegion: --aws-region / AGENTIC_E2E_AWS_REGION / AWS_REGION. Credentials: AWS default chain or AWS_BEARER_TOKEN_BEDROCK.');
+      if (provider === 'bedrock') console.log('\nRegion: --aws-region / AGENTIC_E2E_AWS_REGION / the profile\'s region / AWS_REGION. Credentials: --aws-profile / AGENTIC_E2E_AWS_PROFILE (see `aws-profiles`), else the AWS default chain or AWS_BEARER_TOKEN_BEDROCK.');
+    });
+
+  program.command('aws-profiles').description('list AWS profiles (from ~/.aws/config and ~/.aws/credentials) usable with --aws-profile')
+    .option('--aws-profile <name>', 'mark this profile as selected (default: the configured one)')
+    .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
+    .option('--data-dir <dir>')
+    .action(async (o) => {
+      const cfg = await loadConfig({ configFile: o.config, cli: cliConfig(o) });
+      const profiles = listAwsProfiles();
+      if (!profiles.length) return console.log('No AWS profiles found in ~/.aws/config or ~/.aws/credentials (or AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE). Create one with `aws configure --profile <name>`.');
+      console.log('AWS profiles (select with --aws-profile, AGENTIC_E2E_AWS_PROFILE or `awsProfile` in the config file):');
+      for (const p of profiles) console.log(`  ${p}${p === cfg.awsProfile ? '   <- selected' : ''}`);
+      if (cfg.awsProfile && !profiles.includes(cfg.awsProfile)) console.log(`\nWarning: configured profile "${cfg.awsProfile}" was not found.`);
     });
 
   program.command('list').description('list known sites').option('--data-dir <dir>').option('--config <file>').action(async (o) => {

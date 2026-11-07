@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
+import { listAwsProfiles } from '../core/aws-profiles.js';
 import type { Config } from '../core/config.js';
 import { parseJourneys } from '../core/journeys.js';
 import { listModels, PROVIDERS, type ProviderId } from '../core/llm/models.js';
@@ -13,7 +14,8 @@ import { JobManager, parseJobRequest } from './jobs.js';
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain' };
 
-export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string; host?: string }): Promise<FastifyInstance> {
+/** `awsEnv` is a test seam: the environment used to locate the AWS config/credentials files (default: process.env). */
+export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string; host?: string; awsEnv?: Record<string, string | undefined> }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   const store = new Store(opts.config.dataDir);
   const jobs = new JobManager(opts.config, opts.llm);
@@ -61,6 +63,8 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     if (!(PROVIDERS as readonly string[]).includes(provider)) return reply.code(400).send({ error: `provider must be one of ${PROVIDERS.join(', ')}` });
     return { provider, models: listModels(provider as ProviderId) };
   });
+  // Profile *names* only; never keys, secrets or tokens.
+  app.get('/api/aws-profiles', async () => ({ profiles: listAwsProfiles(opts.awsEnv ?? process.env), ...(opts.config.awsProfile ? { selected: opts.config.awsProfile } : {}) }));
   app.get('/api/sites', async () => store.listSites().map((s) => {
     const runs = store.listRuns(s.id);
     const last = runs.at(-1);
@@ -136,6 +140,9 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   app.post('/api/jobs', async (req, reply) => {
     let jr;
     try { jr = parseJobRequest(req.body); } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
+    const profile = jr.options?.awsProfile;
+    // Only meaningful (and only checked) when the job will actually use Bedrock.
+    if (profile && (jr.options?.provider ?? opts.config.provider) === 'bedrock' && !listAwsProfiles(opts.awsEnv ?? process.env).includes(profile)) return reply.code(400).send({ error: `Unknown AWS profile "${profile}"` });
     try {
       const job = jobs.start(jr);
       return reply.code(202).send({ jobId: job.id });
