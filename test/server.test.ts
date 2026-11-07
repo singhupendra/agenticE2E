@@ -44,6 +44,12 @@ describe('server', () => {
     expect((await app.inject(`/api/jobs/${jobId}`)).json().status).toBe('done');
   });
 
+  it('accepts the exact settings object the UI loads from /api/config as job options', async () => {
+    const options = (await app.inject('/api/config')).json();
+    const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: 'http://roundtrip.test', options } });
+    expect(res.statusCode).toBe(202);
+  });
+
   it('job errors become an error terminal event', async () => {
     const { jobId } = (await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: 'http://never-seen.test' } })).json();
     const events = sse((await app.inject(`/api/jobs/${jobId}/events`)).body);

@@ -42,7 +42,7 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
 
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
-    const { dataDir: _d, ...pub } = opts.config;
+    const { dataDir: _d, maxTokens: _m, ...pub } = opts.config;
     return pub;
   });
   app.get('/api/sites', async () => store.listSites().map((s) => {

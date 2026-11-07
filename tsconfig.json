@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "jsx": "react-jsx"
   },
-  "include": ["src", "test", "web/src", "*.config.ts"]
+  "include": ["src", "test", "*.config.ts"]
 }
