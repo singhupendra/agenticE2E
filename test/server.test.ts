@@ -86,6 +86,17 @@ describe('server', () => {
     expect((await app.inject({ method: 'PUT', url: `/api/sites/${id}/journeys`, payload: [{ id: 'x' }] })).statusCode).toBe(400);
   });
 
+  it('SPEC-006 AC-9: heal records without the new fields are returned unchanged; new fields pass through', async () => {
+    const id = store.listSites()[0].id;
+    const legacy = { id: 'old', journeyId: 'a', at: 't', outcome: 'failed', reason: 'r', originalError: 'e', attempts: [] };
+    const fresh = { ...legacy, id: 'new', lastError: 'Error: boom', candidateDiff: '+x' };
+    store.appendHeal(id, legacy as never);
+    store.appendHeal(id, fresh as never);
+    const heals = (await app.inject(`/api/sites/${id}`)).json().heals;
+    expect(heals.find((h: { id: string }) => h.id === 'old')).toEqual(legacy);
+    expect(heals.find((h: { id: string }) => h.id === 'new')).toMatchObject({ lastError: 'Error: boom', candidateDiff: '+x' });
+  });
+
   it('serves test code and files; AC-34 blocks traversal', async () => {
     const id = store.listSites()[0].id;
     store.saveTest(id, 'browse', 'code here');

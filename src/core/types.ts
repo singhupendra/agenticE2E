@@ -80,6 +80,10 @@ export interface HealRecord {
   originalError: string;
   attempts: HealAttempt[];
   diff?: string;
+  /** SPEC-006: error of the final re-run when the heal ended `failed` (absent when aborted by an error or when nothing was re-run). */
+  lastError?: string;
+  /** SPEC-006: diff original -> last re-run-but-failing patch, kept as the non-active version `candidate-<n>`. */
+  candidateDiff?: string;
 }
 
 export interface ProgressEvent {

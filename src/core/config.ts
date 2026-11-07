@@ -23,7 +23,7 @@ export const configSchema = z.object({
   maxJourneys: z.number().int().positive().default(5),
   include: z.array(z.string()).default([]),
   exclude: z.array(z.string()).default([]),
-  healAttempts: z.number().int().min(0).default(2),
+  healAttempts: z.number().int().min(0).default(3),
   codegenRetries: z.number().int().min(0).default(2),
   requireApproval: z.boolean().default(false),
   testTimeoutMs: z.number().int().positive().default(30_000),

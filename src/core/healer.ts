@@ -18,7 +18,17 @@ First classify the failure (verdict):
 Rules for patches (verdict test_breakage only):
 - Return the COMPLETE corrected spec in "code". Keep the import from './_support', the step() structure, and the test name.
 - NEVER delete, weaken, comment out or skip assertions; never add test.skip/fixme; never replace assertions with tautologies. You may update the expected values of assertions only when the page clearly shows the new correct value for the same behaviour. Adding assertions is fine.
-- Prefer getByRole/getByLabel/getByTestId locators grounded in the ARIA snapshot you are given.`;
+- Prefer getByRole/getByLabel/getByTestId locators grounded in the ARIA snapshot you are given.
+- Review the whole test, not just the failing line. Other steps often break for the same or a related reason (locators that depend on state the test itself changes, e.g. an accessible name that follows the selected option; substring name matches such as "Men's" also matching "Women's"; over-specific URL or query-string assertions). Fix every one you can justify from the snapshot in the same patch, so the next run does not fail on the next defect. Never do this by removing or weakening assertions.`;
+
+/** SPEC-006 FR-2: one-line-per-fact summary of a heal; for `failed` heals the real last error comes first. */
+export function healSummary(h: HealRecord): string {
+  if (h.outcome === 'failed' && h.lastError) {
+    const first = h.lastError.split('\n').find((l) => l.trim()) ?? h.lastError;
+    return `${h.journeyId}: failed — last error: ${first.trim()}\n  last diagnosis: ${h.reason}`;
+  }
+  return `${h.journeyId}: ${h.outcome} — ${h.reason}`;
+}
 
 export type RunnerFn = (journeyIds: string[]) => Promise<RunRecord>;
 
@@ -69,6 +79,9 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
   let verdict: HealRecord['verdict'];
   let reason = 'No attempt produced a passing test';
   let diff: string | undefined;
+  let lastRerunError: string | undefined;
+  let aborted = false;
+  let candidate: string | undefined; // last accepted patch whose re-run failed (SPEC-006 FR-3)
 
   try {
     for (let n = 1; n <= opts.attempts; n++) {
@@ -89,6 +102,7 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
         const rerun = (await opts.runner([journeyId])).results[0];
         attempts.push({ n, verdict, reason, accepted: true, passed: rerun.status === 'passed', error: rerun.error });
         if (rerun.status === 'passed') { outcome = 'flaky_or_environment'; break; }
+        lastRerunError = rerun.error ?? `test ${rerun.status}`;
         last = rerun;
         feedback.push(`Attempt ${n}: you called it flaky/environment but a plain re-run still failed: ${(rerun.error ?? '').slice(0, 500)}`);
         continue;
@@ -114,21 +128,31 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
         break;
       }
       current = patched;
+      candidate = patched;
+      lastRerunError = rerun.error ?? `test ${rerun.status}`;
       last = rerun;
       feedback.push(`Attempt ${n}: your patch ran but still failed with: ${(rerun.error ?? '').slice(0, 600)}`);
     }
   } catch (e) {
     outcome = 'failed';
+    aborted = true;
     reason = `Healing aborted by error: ${(e as Error).message}`;
   } finally {
     if (outcome !== 'healed') store.saveTest(site, journeyId, original); // restore: never keep a worse/unverified test
+  }
+  let candidateDiff: string | undefined;
+  if (outcome === 'failed' && candidate !== undefined) {
+    store.saveTestVersion(site, journeyId, `candidate-${store.listTestVersions(site, journeyId).length}`, candidate);
+    candidateDiff = createTwoFilesPatch(`${journeyId}.spec.ts (original)`, `${journeyId}.spec.ts (candidate)`, original, candidate, '', '', { context: 3 });
   }
   const record: HealRecord = {
     id: `${journeyId}-${new Date().toISOString().replace(/[:.]/g, '-')}`,
     journeyId, at: new Date().toISOString(), outcome, verdict, reason,
     originalError: (opts.failure.error ?? '').slice(0, 4000), attempts, diff,
+    ...(outcome === 'failed' && !aborted && lastRerunError !== undefined ? { lastError: lastRerunError.slice(0, 4000) } : {}),
+    ...(candidateDiff !== undefined ? { candidateDiff } : {}),
   };
   store.appendHeal(site, record);
-  opts.onProgress?.({ type: outcome === 'healed' ? 'info' : 'warn', stage: 'heal', message: `"${journeyId}": ${outcome} — ${reason}` });
+  opts.onProgress?.({ type: outcome === 'healed' ? 'info' : 'warn', stage: 'heal', message: healSummary(record) });
   return record;
 }

@@ -10,7 +10,9 @@ describe('config', () => {
     expect(c.screenshots).toBe('on-failure');
     expect(c.fullPage).toBe(false);
     expect(c.model).toBe('claude-sonnet-5-5');
-    expect(c.healAttempts).toBe(2);
+    expect(c.healAttempts).toBe(3); // SPEC-006 FR-5
+    expect(resolveConfig({ cli: { healAttempts: 0 } }).healAttempts).toBe(0);
+    expect(resolveConfig({ cli: { healAttempts: 2 } }).healAttempts).toBe(2);
   });
 
   it('AC-2: CLI overrides file overrides defaults', () => {

@@ -258,8 +258,11 @@ function Heals({ heals }: { heals: HealRecord[] }) {
       {heals.map((h) => (
         <div key={h.id} className={`result heal-${h.outcome}`}>
           <b>{h.journeyId}</b> <small>{h.at} · <span className="badge">{h.outcome}</span> {h.verdict && `(${h.verdict})`}</small>
-          <p>{h.reason}</p>
+          {h.outcome === 'failed' && h.lastError
+            ? <><p><b>Last error:</b> <code>{h.lastError.split('\n').find((l) => l.trim()) ?? h.lastError}</code></p><p className="muted">Last diagnosis: {h.reason}</p></>
+            : <p>{h.reason}</p>}
           <ul>{h.attempts.map((a) => <li key={a.n}>attempt {a.n}: {a.accepted ? (a.passed ? 'passed' : 'ran, still failing') : `rejected — ${a.rejection}`}</li>)}</ul>
+          {h.candidateDiff && <details><summary>Candidate patch (not applied — saved as a version)</summary><pre className="diff">{h.candidateDiff.split('\n').map((l, i) => <span key={i} className={l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : ''}>{l + '\n'}</span>)}</pre></details>}
           {h.diff && <pre className="diff">{h.diff.split('\n').map((l, i) => <span key={i} className={l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : ''}>{l + '\n'}</span>)}</pre>}
         </div>
       ))}
