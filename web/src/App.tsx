@@ -119,7 +119,7 @@ function ModelPicker({ provider, model, onChange }: { provider: Settings['provid
         {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
         <option value={CUSTOM}>Custom…</option>
       </select>
-      {(custom || !known) && <input value={model} onChange={(e) => onChange(e.target.value)} placeholder={provider === 'bedrock' ? 'anthropic.claude-… or us.anthropic.claude-…' : 'claude-…'} />}
+      {(custom || !known) && <input value={model} onChange={(e) => onChange(e.target.value)} placeholder={provider === 'bedrock' ? 'global.anthropic.claude-… or us.anthropic.claude-…' : 'claude-…'} />}
     </label>
   );
 }

@@ -50,7 +50,7 @@ export AGENTIC_E2E_AWS_REGION=us-east-1   # optional if the profile sets `region
 export AGENTIC_E2E_PROVIDER=bedrock
 export AWS_BEARER_TOKEN_BEDROCK=...       # the Bedrock API key (never stored in config or shown in the UI)
 export AWS_REGION=us-east-1
-export AGENTICQA_BEDROCK_MODEL_ID=us.anthropic.claude-sonnet-5-5   # any Bedrock model / inference-profile id
+export AGENTICQA_BEDROCK_MODEL_ID=global.anthropic.claude-sonnet-5-5   # any Bedrock inference-profile id (global., us., apac. …) or ARN
 ```
 
 `AGENTICQA_BEDROCK_MODEL_ID` sets the model when the provider is Bedrock (it beats `AGENTIC_E2E_MODEL` and the config file; `--model` beats it). The provider is not switched automatically: keep `AGENTIC_E2E_PROVIDER=bedrock` (or `--provider bedrock`).
@@ -140,9 +140,9 @@ export default {
 | Option | Default | Notes |
 |---|---|---|
 | `provider` | `anthropic` | `anthropic` \| `bedrock`; env `AGENTIC_E2E_PROVIDER`, flag `--provider` |
-| `model` | `claude-sonnet-5-5` | env `AGENTIC_E2E_MODEL` (on Bedrock also `AGENTICQA_BEDROCK_MODEL_ID`, which wins). Pick from `agentic-e2e models` or the UI dropdown, or give any id; on Bedrock bare ids get the `anthropic.` prefix |
+| `model` | `claude-sonnet-5-5` | env `AGENTIC_E2E_MODEL` (on Bedrock also `AGENTICQA_BEDROCK_MODEL_ID`, which wins). Pick from `agentic-e2e models` or the UI dropdown, or give any id; on Bedrock bare ids get the `global.anthropic.` inference-profile prefix (SPEC-005), so the default is `global.anthropic.claude-sonnet-5-5`; ids with a vendor/profile prefix (`us.`, `apac.`, `anthropic.`, ARNs) pass through |
 | `awsRegion` | – | Bedrock only; env `AGENTIC_E2E_AWS_REGION`, flag `--aws-region`, else the selected profile's `region`, else `AWS_REGION` / `AWS_DEFAULT_REGION` |
-| `awsProfile` | – | Bedrock only; named AWS profile supplying credentials; env `AGENTIC_E2E_AWS_PROFILE`, flag `--aws-profile`, or the UI dropdown. Unset = AWS default credential chain. An unknown name fails fast with the list of available profiles |
+| `awsProfile` | – | Bedrock only; named AWS profile supplying credentials (loaded through the AWS SDK provider chain for that profile, so it wins over the shell's `AWS_PROFILE`; static keys, SSO, assume-role all work); env `AGENTIC_E2E_AWS_PROFILE`, flag `--aws-profile`, or the UI dropdown. Unset = AWS default credential chain. An unknown name fails fast with the list of available profiles |
 | `maxTokens` | `8000` | per LLM response |
 | `screenshots` | `on-failure` | `off` \| `on-failure` \| `every-step` \| `end-of-journey`; env `AGENTIC_E2E_SCREENSHOTS` |
 | `fullPage` | `false` | full-page screenshots; env `AGENTIC_E2E_FULL_PAGE` |
