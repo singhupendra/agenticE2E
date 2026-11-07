@@ -140,7 +140,7 @@ describe('server', () => {
     const b = await app.inject('/api/models?provider=bedrock');
     expect(b.statusCode).toBe(200);
     expect(b.json().provider).toBe('bedrock');
-    expect(b.json().models.map((m: { id: string }) => m.id)).toContain('anthropic.claude-sonnet-5-5');
+    expect(b.json().models.map((m: { id: string }) => m.id)).toContain('global.anthropic.claude-sonnet-5-5');
     expect((await app.inject('/api/models?provider=nope')).statusCode).toBe(400);
     const d = (await app.inject('/api/models')).json();
     expect(d.provider).toBe('anthropic');

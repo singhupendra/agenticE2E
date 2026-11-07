@@ -66,7 +66,7 @@ describe('cli', () => {
 
   it('SPEC-002 AC-9: models lists the catalog per provider', async () => {
     expect(await cli('models', '--provider', 'bedrock')).toBe(0);
-    expect(out.join('\n')).toContain('anthropic.claude-sonnet-5-5');
+    expect(out.join('\n')).toContain('global.anthropic.claude-sonnet-5-5');
     out.length = 0;
     expect(await cli('models')).toBe(0);
     expect(out.join('\n')).toContain('claude-sonnet-5-5');

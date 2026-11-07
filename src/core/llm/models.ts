@@ -17,8 +17,12 @@ const CATALOG: ModelInfo[] = [
 /** Bedrock ids already carrying a vendor / inference-profile / ARN prefix are passed through untouched. */
 const BEDROCK_PREFIXED = /^(anthropic\.|(us|eu|apac|global|us-gov|jp|au|ca)\.anthropic\.|arn:)/;
 
+/**
+ * SPEC-005 FR-5: the catalog models are inference-profile-only on bedrock-runtime (the bare `anthropic.<id>` is rejected with
+ * "on-demand throughput isn't supported"), so bare ids get the `global.` cross-region profile prefix.
+ */
 export function resolveModelId(provider: ProviderId, model: string): string {
-  if (provider === 'bedrock') return BEDROCK_PREFIXED.test(model) ? model : `anthropic.${model}`;
+  if (provider === 'bedrock') return BEDROCK_PREFIXED.test(model) ? model : `global.anthropic.${model}`;
   return model.startsWith('anthropic.') ? model.slice('anthropic.'.length) : model;
 }
 

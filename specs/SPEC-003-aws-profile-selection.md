@@ -1,6 +1,6 @@
 # SPEC-003: AWS profile selection for Amazon Bedrock
 
-- **Status:** Implemented (v0.3)
+- **Status:** Implemented (v0.3); the client wiring (`awsProfile` passed to Mantle) is superseded by SPEC-005 (a `providerChainResolver` for the profile)
 - **Depends on:** SPEC-001 (FR-8 config precedence), SPEC-002 (Bedrock provider, FR-2/FR-6)
 - **Stack:** `@anthropic-ai/bedrock-sdk` (`awsProfile` option), zod, Fastify, React
 

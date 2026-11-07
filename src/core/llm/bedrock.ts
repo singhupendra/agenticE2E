@@ -1,12 +1,18 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { AnthropicBedrockMantle } from '@anthropic-ai/bedrock-sdk';
+import { AnthropicBedrock } from '@anthropic-ai/bedrock-sdk';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
 import { awsProfileRegion, listAwsProfiles } from '../aws-profiles.js';
 import { AnthropicProvider } from './anthropic.js';
 
 export type MessagesClient = Pick<Anthropic, 'messages'>;
 
-/** `apiKey` is a Bedrock API key (Bearer token); it is only set when no profile is selected. */
-export interface BedrockClientOptions { awsRegion: string; awsProfile?: string; apiKey?: string }
+type CredentialProvider = ReturnType<typeof fromNodeProviderChain>;
+
+/**
+ * `apiKey` is a Bedrock API key (Bearer token); it is only set when no profile is selected. `providerChainResolver` is only set
+ * when a profile is selected: the classic client has no profile option and would otherwise read the shell's AWS_PROFILE.
+ */
+export interface BedrockClientOptions { awsRegion: string; providerChainResolver?: () => Promise<CredentialProvider>; apiKey?: string }
 
 export interface BedrockOptions {
   model: string;
@@ -18,10 +24,12 @@ export interface BedrockOptions {
   env?: Record<string, string | undefined>;
   /** Test seam. */
   createClient?: (o: BedrockClientOptions) => MessagesClient;
+  /** Test seam: loads credentials for a named profile (default: the AWS SDK's Node provider chain). */
+  fromProfile?: (o: { profile: string }) => CredentialProvider;
 }
 
 /**
- * Claude on Amazon Bedrock via the Messages-API ("Mantle") endpoint. Credentials come from the selected AWS profile, else a Bedrock
+ * Claude on Amazon Bedrock via the classic `bedrock-runtime` endpoint (SPEC-005). Credentials come from the selected AWS profile, else a Bedrock
  * API key in AWS_BEARER_TOKEN_BEDROCK, else the standard AWS chain (env, SSO, instance role); nothing is read from or written to config.
  */
 export function createBedrockProvider(opts: BedrockOptions): AnthropicProvider {
@@ -38,8 +46,10 @@ export function createBedrockProvider(opts: BedrockOptions): AnthropicProvider {
     ?? (env.AWS_REGION || undefined)
     ?? (env.AWS_DEFAULT_REGION || undefined);
   if (!awsRegion) throw new Error(`No AWS region for Bedrock. Set \`awsRegion\` (--aws-region / AGENTIC_E2E_AWS_REGION), the AWS_REGION environment variable${awsProfile ? `, or a region in AWS profile "${awsProfile}"` : ''}.`);
-  const make = opts.createClient ?? ((o: BedrockClientOptions) => new AnthropicBedrockMantle(o) as unknown as MessagesClient);
+  const make = opts.createClient ?? ((o: BedrockClientOptions) => new AnthropicBedrock(o) as unknown as MessagesClient);
   const apiKey = awsProfile ? undefined : env.AWS_BEARER_TOKEN_BEDROCK?.trim() || undefined;
-  const client = make(awsProfile ? { awsRegion, awsProfile } : apiKey ? { awsRegion, apiKey } : { awsRegion });
+  const fromProfile = opts.fromProfile ?? fromNodeProviderChain;
+  // SPEC-005 FR-2: lazy, so nothing is loaded (or refreshed, for SSO) until a request needs credentials.
+  const client = make(awsProfile ? { awsRegion, providerChainResolver: async () => fromProfile({ profile: awsProfile }) } : apiKey ? { awsRegion, apiKey } : { awsRegion });
   return new AnthropicProvider({ provider: 'bedrock', model: opts.model, maxTokens: opts.maxTokens, client });
 }

@@ -1,6 +1,6 @@
 # SPEC-002: Amazon Bedrock provider and model selection
 
-- **Status:** Implemented (v0.2)
+- **Status:** Implemented (v0.2); the Mantle client and the bare `anthropic.` id mapping are superseded by SPEC-005
 - **Depends on:** SPEC-001 (FR-8 config precedence, FR-9 LLM layer)
 - **Stack:** `@anthropic-ai/bedrock-sdk` (`AnthropicBedrockMantle`), zod, Fastify, React
 

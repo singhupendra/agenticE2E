@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { createBedrockProvider } from '../src/core/llm/bedrock.js';
 import { createLLMProvider } from '../src/core/llm/index.js';
@@ -17,7 +17,7 @@ describe('Bedrock provider (SPEC-002)', () => {
     const f = fakeClient();
     const p = createBedrockProvider({ model: 'claude-haiku-4-5', awsRegion: 'us-east-1', createClient: () => f.client });
     expect(await p.structured(req)).toEqual({ code: 'ok' });
-    expect(f.calls[0].model).toBe('anthropic.claude-haiku-4-5');
+    expect(f.calls[0].model).toBe('global.anthropic.claude-haiku-4-5');
   });
 
   it('AC-11: no region anywhere -> clear error', () => {
@@ -48,16 +48,28 @@ describe('Bedrock provider (SPEC-002)', () => {
   describe('AWS profile (SPEC-003)', () => {
     const aws = () => fakeAwsFiles(SAMPLE_CONFIG, SAMPLE_CREDENTIALS);
     const seen = () => {
-      const calls: { awsRegion: string; awsProfile?: string }[] = [];
-      return { calls, createClient: (o: { awsRegion: string; awsProfile?: string }) => { calls.push(o); return fakeClient().client; } };
+      const calls: { awsRegion: string; providerChainResolver?: () => Promise<unknown>; awsProfile?: string }[] = [];
+      return { calls, createClient: (o: { awsRegion: string; providerChainResolver?: () => Promise<unknown> }) => { calls.push(o); return fakeClient().client; } };
     };
 
-    it('AC-7: passes the selected profile to the client; none -> undefined', () => {
+    it('SPEC-005 AC-2: a selected profile becomes a providerChainResolver (no awsProfile/apiKey); none -> region only (AC-1)', () => {
       const s = seen();
       createBedrockProvider({ model: 'm', awsProfile: 'dev', env: aws(), createClient: s.createClient });
       createBedrockProvider({ model: 'm', awsRegion: 'us-east-1', env: aws(), createClient: s.createClient });
-      expect(s.calls[0]).toEqual({ awsRegion: 'eu-west-1', awsProfile: 'dev' });
-      expect(s.calls[1].awsProfile).toBeUndefined();
+      expect(Object.keys(s.calls[0]).sort()).toEqual(['awsRegion', 'providerChainResolver']);
+      expect(s.calls[0].awsRegion).toBe('eu-west-1');
+      expect(typeof s.calls[0].providerChainResolver).toBe('function');
+      expect(s.calls[1]).toEqual({ awsRegion: 'us-east-1' });
+    });
+
+    it('SPEC-005 AC-3: the resolver loads the selected profile, ignoring AWS_PROFILE in env', async () => {
+      const s = seen();
+      const creds = async () => ({ accessKeyId: 'a', secretAccessKey: 'b' });
+      const fromProfile = vi.fn(() => creds);
+      createBedrockProvider({ model: 'm', awsProfile: 'dev', env: { ...aws(), AWS_PROFILE: 'bedrock' }, createClient: s.createClient, fromProfile });
+      expect(fromProfile).not.toHaveBeenCalled(); // lazy: only when credentials are needed
+      expect(await s.calls[0].providerChainResolver!()).toBe(creds);
+      expect(fromProfile).toHaveBeenCalledWith({ profile: 'dev' });
     });
 
     it('AC-8: region precedence awsRegion > profile region > AWS_REGION > AWS_DEFAULT_REGION', () => {
@@ -90,7 +102,8 @@ describe('Bedrock provider (SPEC-002)', () => {
       const s = seen();
       const cfg = resolveConfig({ cli: { provider: 'bedrock', awsProfile: 'dev', awsRegion: 'us-east-1' } });
       createLLMProvider(cfg, { env: aws(), createBedrockClient: s.createClient });
-      expect(s.calls[0]).toEqual({ awsRegion: 'us-east-1', awsProfile: 'dev' });
+      expect(s.calls[0].awsRegion).toBe('us-east-1');
+      expect(typeof s.calls[0].providerChainResolver).toBe('function');
     });
   });
 
@@ -98,7 +111,7 @@ describe('Bedrock provider (SPEC-002)', () => {
     const a = createLLMProvider(resolveConfig({ cli: { provider: 'anthropic', model: 'anthropic.claude-opus-5-5' } }), { apiKey: 'k' });
     expect(a).toMatchObject({ provider: 'anthropic', model: 'claude-opus-5-5' });
     const b = createLLMProvider(resolveConfig({ cli: { provider: 'bedrock', awsRegion: 'us-east-1' } }), { createBedrockClient: () => fakeClient().client });
-    expect(b).toMatchObject({ provider: 'bedrock', model: 'anthropic.claude-sonnet-5-5' });
+    expect(b).toMatchObject({ provider: 'bedrock', model: 'global.anthropic.claude-sonnet-5-5' });
   });
   describe('Bedrock API key (SPEC-004)', () => {
     const seen = () => {
@@ -115,7 +128,8 @@ describe('Bedrock provider (SPEC-002)', () => {
     it('AC-2: a selected profile wins, no apiKey is passed', () => {
       const s = seen();
       createBedrockProvider({ model: 'm', awsProfile: 'dev', env: { ...fakeAwsFiles(SAMPLE_CONFIG, SAMPLE_CREDENTIALS), AWS_BEARER_TOKEN_BEDROCK: 'tok' }, createClient: s.createClient });
-      expect(s.calls[0]).toEqual({ awsRegion: 'eu-west-1', awsProfile: 'dev' });
+      expect(s.calls[0].awsRegion).toBe('eu-west-1');
+      expect(typeof s.calls[0].providerChainResolver).toBe('function');
       expect('apiKey' in s.calls[0]).toBe(false);
     });
 
