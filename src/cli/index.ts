@@ -174,7 +174,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const provider: ProviderId = cfg.provider;
       console.log(`Models for ${provider} (any other id can be passed to --model):`);
       for (const m of listModels(provider)) console.log(`  ${m.id.padEnd(36)} ${m.label}${m.id === resolveModelId(provider, cfg.model) ? '   <- selected' : ''}`);
-      if (provider === 'bedrock') console.log('\nRegion: --aws-region / AGENTIC_E2E_AWS_REGION / the profile\'s region / AWS_REGION. Credentials: --aws-profile / AGENTIC_E2E_AWS_PROFILE (see `aws-profiles`), else the AWS default chain or AWS_BEARER_TOKEN_BEDROCK.');
+      if (provider === 'bedrock') console.log('\nRegion: --aws-region / AGENTIC_E2E_AWS_REGION / the profile\'s region / AWS_REGION. Credentials: --aws-profile / AGENTIC_E2E_AWS_PROFILE (see `aws-profiles`), else a Bedrock API key in AWS_BEARER_TOKEN_BEDROCK, else the AWS default chain. Model: --model / AGENTICQA_BEDROCK_MODEL_ID.');
     });
 
   program.command('aws-profiles').description('list AWS profiles (from ~/.aws/config and ~/.aws/credentials) usable with --aws-profile')

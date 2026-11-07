@@ -5,7 +5,8 @@ import { AnthropicProvider } from './anthropic.js';
 
 export type MessagesClient = Pick<Anthropic, 'messages'>;
 
-export interface BedrockClientOptions { awsRegion: string; awsProfile?: string }
+/** `apiKey` is a Bedrock API key (Bearer token); it is only set when no profile is selected. */
+export interface BedrockClientOptions { awsRegion: string; awsProfile?: string; apiKey?: string }
 
 export interface BedrockOptions {
   model: string;
@@ -20,8 +21,8 @@ export interface BedrockOptions {
 }
 
 /**
- * Claude on Amazon Bedrock via the Messages-API ("Mantle") endpoint. Credentials come from the selected AWS profile, else the
- * standard AWS chain (env, SSO, instance role) or AWS_BEARER_TOKEN_BEDROCK; nothing is read from or written to config.
+ * Claude on Amazon Bedrock via the Messages-API ("Mantle") endpoint. Credentials come from the selected AWS profile, else a Bedrock
+ * API key in AWS_BEARER_TOKEN_BEDROCK, else the standard AWS chain (env, SSO, instance role); nothing is read from or written to config.
  */
 export function createBedrockProvider(opts: BedrockOptions): AnthropicProvider {
   const env = opts.env ?? process.env;
@@ -38,6 +39,7 @@ export function createBedrockProvider(opts: BedrockOptions): AnthropicProvider {
     ?? (env.AWS_DEFAULT_REGION || undefined);
   if (!awsRegion) throw new Error(`No AWS region for Bedrock. Set \`awsRegion\` (--aws-region / AGENTIC_E2E_AWS_REGION), the AWS_REGION environment variable${awsProfile ? `, or a region in AWS profile "${awsProfile}"` : ''}.`);
   const make = opts.createClient ?? ((o: BedrockClientOptions) => new AnthropicBedrockMantle(o) as unknown as MessagesClient);
-  const client = make(awsProfile ? { awsRegion, awsProfile } : { awsRegion });
+  const apiKey = awsProfile ? undefined : env.AWS_BEARER_TOKEN_BEDROCK?.trim() || undefined;
+  const client = make(awsProfile ? { awsRegion, awsProfile } : apiKey ? { awsRegion, apiKey } : { awsRegion });
   return new AnthropicProvider({ provider: 'bedrock', model: opts.model, maxTokens: opts.maxTokens, client });
 }

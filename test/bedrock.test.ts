@@ -100,4 +100,42 @@ describe('Bedrock provider (SPEC-002)', () => {
     const b = createLLMProvider(resolveConfig({ cli: { provider: 'bedrock', awsRegion: 'us-east-1' } }), { createBedrockClient: () => fakeClient().client });
     expect(b).toMatchObject({ provider: 'bedrock', model: 'anthropic.claude-sonnet-5-5' });
   });
+  describe('Bedrock API key (SPEC-004)', () => {
+    const seen = () => {
+      const calls: any[] = [];
+      return { calls, createClient: (o: any) => { calls.push(o); return fakeClient().client; } };
+    };
+
+    it('AC-1/AC-5: passes the trimmed AWS_BEARER_TOKEN_BEDROCK as apiKey with the AWS_REGION', () => {
+      const s = seen();
+      createBedrockProvider({ model: 'm', env: { AWS_BEARER_TOKEN_BEDROCK: '  tok  ', AWS_REGION: 'eu-west-1' }, createClient: s.createClient });
+      expect(s.calls[0]).toEqual({ awsRegion: 'eu-west-1', apiKey: 'tok' });
+    });
+
+    it('AC-2: a selected profile wins, no apiKey is passed', () => {
+      const s = seen();
+      createBedrockProvider({ model: 'm', awsProfile: 'dev', env: { ...fakeAwsFiles(SAMPLE_CONFIG, SAMPLE_CREDENTIALS), AWS_BEARER_TOKEN_BEDROCK: 'tok' }, createClient: s.createClient });
+      expect(s.calls[0]).toEqual({ awsRegion: 'eu-west-1', awsProfile: 'dev' });
+      expect('apiKey' in s.calls[0]).toBe(false);
+    });
+
+    it('AC-3: unset or blank token -> no apiKey key', () => {
+      const s = seen();
+      createBedrockProvider({ model: 'm', awsRegion: 'us-east-1', env: {}, createClient: s.createClient });
+      createBedrockProvider({ model: 'm', awsRegion: 'us-east-1', env: { AWS_BEARER_TOKEN_BEDROCK: '   ' }, createClient: s.createClient });
+      expect(s.calls.every((c) => !('apiKey' in c))).toBe(true);
+    });
+
+    it('AC-4: ignored for the anthropic provider', () => {
+      const s = seen();
+      const p = createLLMProvider({ provider: 'anthropic', model: 'claude-haiku-4-5', maxTokens: 10 }, { apiKey: 'k', env: { AWS_BEARER_TOKEN_BEDROCK: 'tok' }, createBedrockClient: s.createClient });
+      expect(p).toBeDefined();
+      expect(s.calls).toHaveLength(0);
+    });
+
+    it('AC-9: the token never shows up in errors', () => {
+      expect(() => createBedrockProvider({ model: 'm', env: { AWS_BEARER_TOKEN_BEDROCK: 'super-secret-token' }, createClient: () => fakeClient().client }))
+        .toThrow(expect.objectContaining({ message: expect.not.stringContaining('super-secret-token') }));
+    });
+  });
 });
