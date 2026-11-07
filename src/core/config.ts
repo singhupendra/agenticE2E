@@ -57,7 +57,10 @@ export function resolveConfig(opts: {
     const v = opts.env?.[name];
     if (v !== undefined && v !== '') envCfg[key] = parse(v);
   }
-  const merged = { ...stripUndefined(opts.file), ...envCfg, ...stripUndefined(opts.cli) };
+  const merged: Record<string, unknown> = { ...stripUndefined(opts.file), ...envCfg, ...stripUndefined(opts.cli) };
+  // SPEC-004: Bedrock-specific model id; beats file/AGENTIC_E2E_MODEL, loses to an explicit CLI model.
+  const bedrockModel = opts.env?.AGENTICQA_BEDROCK_MODEL_ID?.trim();
+  if (bedrockModel && merged.provider === 'bedrock' && stripUndefined(opts.cli).model === undefined) merged.model = bedrockModel;
   const parsed = configSchema.safeParse(merged);
   if (!parsed.success) {
     const msg = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');

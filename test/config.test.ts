@@ -84,3 +84,31 @@ describe('config', () => {
     for (const p of ['default', 'my-profile', 'corp.sso_admin', 'user@acct:role']) expect(resolveConfig({ cli: { awsProfile: p } }).awsProfile).toBe(p);
   });
 });
+
+describe('AGENTICQA_BEDROCK_MODEL_ID (SPEC-004)', () => {
+  const MODEL = 'us.anthropic.claude-sonnet-5-5';
+
+  it('AC-6: sets the model when the provider is bedrock', () => {
+    const c = resolveConfig({ env: { AGENTIC_E2E_PROVIDER: 'bedrock', AGENTICQA_BEDROCK_MODEL_ID: MODEL } });
+    expect(c.model).toBe(MODEL);
+  });
+
+  it('AC-7: beats file and AGENTIC_E2E_MODEL, loses to the CLI', () => {
+    const env = { AGENTIC_E2E_PROVIDER: 'bedrock', AGENTIC_E2E_MODEL: 'b', AGENTICQA_BEDROCK_MODEL_ID: MODEL };
+    expect(resolveConfig({ file: { model: 'a' }, env }).model).toBe(MODEL);
+    expect(resolveConfig({ file: { model: 'a' }, env, cli: { model: 'c' } }).model).toBe('c');
+  });
+
+  it('AC-8: ignored for anthropic and when empty; provider may come from file or CLI', () => {
+    expect(resolveConfig({ env: { AGENTICQA_BEDROCK_MODEL_ID: MODEL } }).model).toBe('claude-sonnet-5-5');
+    expect(resolveConfig({ env: { AGENTIC_E2E_PROVIDER: 'bedrock', AGENTICQA_BEDROCK_MODEL_ID: '' } }).model).toBe('claude-sonnet-5-5');
+    expect(resolveConfig({ file: { provider: 'bedrock' }, env: { AGENTICQA_BEDROCK_MODEL_ID: MODEL } }).model).toBe(MODEL);
+    expect(resolveConfig({ cli: { provider: 'bedrock' }, env: { AGENTICQA_BEDROCK_MODEL_ID: MODEL } }).model).toBe(MODEL);
+    expect(resolveConfig({ cli: { provider: 'anthropic' }, env: { AGENTIC_E2E_PROVIDER: 'bedrock', AGENTICQA_BEDROCK_MODEL_ID: MODEL } }).model).toBe('claude-sonnet-5-5');
+  });
+
+  it('AC-9: the resolved config carries no token', () => {
+    const c = resolveConfig({ env: { AGENTIC_E2E_PROVIDER: 'bedrock', AWS_BEARER_TOKEN_BEDROCK: 'super-secret-token', AWS_REGION: 'us-east-1' } });
+    expect(JSON.stringify(c)).not.toContain('super-secret-token');
+  });
+});

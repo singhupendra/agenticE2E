@@ -4,7 +4,7 @@ import { buildRunnerEnv } from '../src/core/runner.js';
 describe('runner env allowlist', () => {
   it('drops secrets and unknown vars, keeps PATH/HOME and sets AGENTIC_E2E_*', () => {
     const env = buildRunnerEnv(
-      { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'sk-secret', AWS_SECRET_ACCESS_KEY: 'x', GITHUB_TOKEN: 't', AGENTIC_E2E_MODEL: 'm', LANG: 'en_US.UTF-8', PLAYWRIGHT_BROWSERS_PATH: '/pw' },
+      { PATH: '/bin', HOME: '/h', ANTHROPIC_API_KEY: 'sk-secret', AWS_SECRET_ACCESS_KEY: 'x', AWS_BEARER_TOKEN_BEDROCK: 'tok', GITHUB_TOKEN: 't', AGENTIC_E2E_MODEL: 'm', LANG: 'en_US.UTF-8', PLAYWRIGHT_BROWSERS_PATH: '/pw' },
       { AGENTIC_E2E_SCREENSHOTS: 'off' },
     );
     expect(env.PATH).toBe('/bin');
@@ -14,6 +14,7 @@ describe('runner env allowlist', () => {
     expect(env.AGENTIC_E2E_SCREENSHOTS).toBe('off');
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.AWS_BEARER_TOKEN_BEDROCK).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
     expect(env.AGENTIC_E2E_MODEL).toBeUndefined();
   });
