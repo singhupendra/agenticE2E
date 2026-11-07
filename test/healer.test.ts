@@ -87,6 +87,24 @@ describe('healTest', () => {
     expect(store.loadTest(SITE, 'contact')).toBe(FAILING_SPEC);
   });
 
+  it('restores the original and records the failure when the runner throws', async () => {
+    const llm = new MockLLM(() => ({ verdict: 'test_breakage', reason: 'x', code: HEALED_SPEC }));
+    const r = await healTest(store, llm, { ...base(), runner: async () => { throw new Error('spawn EAGAIN'); } });
+    expect(r.outcome).toBe('failed');
+    expect(r.reason).toMatch(/spawn EAGAIN/);
+    expect(store.loadTest(SITE, 'contact')).toBe(FAILING_SPEC);
+    expect(store.loadHeals(SITE)).toHaveLength(1);
+  });
+
+  it('restores the original and records the failure when the LLM throws mid-heal', async () => {
+    const llm = new MockLLM((_r, i) => { if (i === 1) throw new Error('API 529'); return { verdict: 'test_breakage', reason: 'x', code: HEALED_SPEC }; });
+    const r = await healTest(store, llm, { ...base(), runner: async () => rec('failed', 'still broken') });
+    expect(r.outcome).toBe('failed');
+    expect(r.reason).toMatch(/API 529/);
+    expect(r.attempts).toHaveLength(1);
+    expect(store.loadTest(SITE, 'contact')).toBe(FAILING_SPEC);
+  });
+
   it('includes the screenshot as an image when available', async () => {
     const siteDir = store.siteDir(SITE);
     fs.mkdirSync(path.join(siteDir, 'screenshots'), { recursive: true });

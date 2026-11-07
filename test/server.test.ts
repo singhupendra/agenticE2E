@@ -102,6 +102,31 @@ describe('server', () => {
     expect((await app.inject('/api/sites/not-a-site')).statusCode).toBe(404);
   });
 
+  it('rejects DNS-rebinding requests: Host not in allowlist (even when Origin matches Host)', async () => {
+    const rebound = { origin: 'http://attacker.com:4173', host: 'attacker.com:4173' };
+    expect((await app.inject({ method: 'GET', url: '/api/sites', headers: { host: 'attacker.com:4173' } })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/jobs', headers: rebound, payload: { action: 'run', url: fx.url } })).statusCode).toBe(403);
+    for (const host of ['localhost:4173', '127.0.0.1:4173', '[::1]:4173']) {
+      expect((await app.inject({ method: 'GET', url: '/api/health', headers: { host } })).statusCode).toBe(200);
+    }
+  });
+
+  it('allows an explicitly configured host', async () => {
+    const custom = await buildApp({ config: resolveConfig({ cli: { dataDir } }), webDir: path.join(dataDir, 'no-web'), host: 'my-box.lan' });
+    expect((await custom.inject({ method: 'GET', url: '/api/health', headers: { host: 'my-box.lan:4173' } })).statusCode).toBe(200);
+    expect((await custom.inject({ method: 'GET', url: '/api/health', headers: { host: 'other.lan:4173' } })).statusCode).toBe(403);
+    await custom.close();
+  });
+
+  it('requires application/json on mutating requests (blocks simple cross-site form posts)', async () => {
+    const body = JSON.stringify({ action: 'run', url: 'http://ct.test' });
+    for (const ct of ['text/plain', 'application/x-www-form-urlencoded', undefined]) {
+      const r = await app.inject({ method: 'POST', url: '/api/jobs', headers: ct ? { 'content-type': ct } : {}, payload: body });
+      expect([403, 415]).toContain(r.statusCode);
+    }
+    expect((await app.inject({ method: 'POST', url: '/api/jobs', headers: { 'content-type': 'application/json' }, payload: body })).statusCode).toBe(202);
+  });
+
   it('rejects cross-origin mutating requests', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/jobs', headers: { origin: 'http://evil.example', host: 'localhost:4173' }, payload: { action: 'run', url: fx.url } });
     expect(r.statusCode).toBe(403);

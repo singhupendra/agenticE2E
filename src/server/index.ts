@@ -7,7 +7,7 @@ import { buildApp } from './app.js';
 export { buildApp };
 
 export async function startServer(opts: { config: Config; port?: number; host?: string; llm?: LLMProvider }): Promise<{ url: string; close: () => Promise<void> }> {
-  const app = await buildApp({ config: opts.config, llm: opts.llm });
+  const app = await buildApp({ config: opts.config, llm: opts.llm, host: opts.host });
   const host = opts.host ?? '127.0.0.1';
   const address = await app.listen({ port: opts.port ?? 4173, host });
   return { url: address.replace('127.0.0.1', 'localhost'), close: () => app.close() };

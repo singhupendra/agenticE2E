@@ -12,14 +12,24 @@ import { JobManager, parseJobRequest } from './jobs.js';
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain' };
 
-export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string }): Promise<FastifyInstance> {
+export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string; host?: string }): Promise<FastifyInstance> {
   const app = Fastify({ logger: false });
   const store = new Store(opts.config.dataDir);
   const jobs = new JobManager(opts.config, opts.llm);
 
-  // This server runs generated tests and spends LLM credits: block cross-site requests (CSRF / DNS-rebinding style).
+  // This server runs generated tests and spends LLM credits. Defences:
+  //  1. Host allowlist on every request (stops DNS rebinding: a rebound page has Host == Origin == attacker.com).
+  //  2. Mutating requests must be application/json (cannot be sent cross-site without a CORS preflight, which we never grant).
+  //  3. If an Origin is sent on a mutating request it must match Host.
+  const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+  if (opts.host && !['0.0.0.0', '::'].includes(opts.host)) allowedHosts.add(opts.host.toLowerCase().replace(/^([^[].*:.*)$/, '[$1]'));
+  const hostnameOf = (hostHeader: string | undefined) => {
+    try { return new URL(`http://${hostHeader ?? ''}`).hostname.toLowerCase(); } catch { return ''; }
+  };
   app.addHook('onRequest', async (req, reply) => {
+    if (!allowedHosts.has(hostnameOf(req.headers.host))) return reply.code(403).send({ error: 'Host not allowed' });
     if (req.method === 'GET' || req.method === 'HEAD') return;
+    if (!/^application\/json(\s*;|$)/i.test(req.headers['content-type'] ?? '')) return reply.code(415).send({ error: 'Content-Type must be application/json' });
     const origin = req.headers.origin;
     if (origin) {
       let host = '';

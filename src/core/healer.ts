@@ -70,54 +70,59 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
   let reason = 'No attempt produced a passing test';
   let diff: string | undefined;
 
-  for (let n = 1; n <= opts.attempts; n++) {
-    opts.onProgress?.({ type: 'info', stage: 'heal', message: `Healing "${journeyId}" — attempt ${n}/${opts.attempts}` });
-    const out = await llm.structured({
-      name: 'heal_test', description: 'Diagnose a failing Playwright test and optionally return a patched spec.', system: HEAL_SYSTEM,
-      prompt: buildPrompt(current, last, feedback), schema: healSchema, images: readImage(store, site, last.failure?.screenshot),
-    });
-    verdict = out.verdict;
-    reason = out.reason;
+  try {
+    for (let n = 1; n <= opts.attempts; n++) {
+      opts.onProgress?.({ type: 'info', stage: 'heal', message: `Healing "${journeyId}" — attempt ${n}/${opts.attempts}` });
+      const out = await llm.structured({
+        name: 'heal_test', description: 'Diagnose a failing Playwright test and optionally return a patched spec.', system: HEAL_SYSTEM,
+        prompt: buildPrompt(current, last, feedback), schema: healSchema, images: readImage(store, site, last.failure?.screenshot),
+      });
+      verdict = out.verdict;
+      reason = out.reason;
 
-    if (out.verdict === 'app_bug') {
-      attempts.push({ n, verdict, reason, accepted: false, rejection: 'verdict app_bug: not patched' });
-      outcome = 'app_bug';
-      break;
-    }
-    if (out.verdict === 'flaky_or_environment') {
+      if (out.verdict === 'app_bug') {
+        attempts.push({ n, verdict, reason, accepted: false, rejection: 'verdict app_bug: not patched' });
+        outcome = 'app_bug';
+        break;
+      }
+      if (out.verdict === 'flaky_or_environment') {
+        const rerun = (await opts.runner([journeyId])).results[0];
+        attempts.push({ n, verdict, reason, accepted: true, passed: rerun.status === 'passed', error: rerun.error });
+        if (rerun.status === 'passed') { outcome = 'flaky_or_environment'; break; }
+        last = rerun;
+        feedback.push(`Attempt ${n}: you called it flaky/environment but a plain re-run still failed: ${(rerun.error ?? '').slice(0, 500)}`);
+        continue;
+      }
+
+      const reject = (rejection: string) => { attempts.push({ n, verdict, reason, accepted: false, rejection }); feedback.push(`Attempt ${n} rejected: ${rejection}`); };
+      if (!out.code) { reject('verdict was test_breakage but no code was returned'); continue; }
+      const patched = stripFences(out.code);
+      if (patched === current) { reject('patch is identical to the current code'); continue; }
+      const weak = weakensAssertions(original, patched);
+      if (weak) { reject(weak); continue; }
+      const v = await validateSpec(patched);
+      if (!v.ok) { reject(`patch failed validation: ${v.errors.join('; ')}`); continue; }
+
+      store.saveTest(site, journeyId, patched);
       const rerun = (await opts.runner([journeyId])).results[0];
-      attempts.push({ n, verdict, reason, accepted: true, passed: rerun.status === 'passed', error: rerun.error });
-      if (rerun.status === 'passed') { outcome = 'flaky_or_environment'; break; }
+      const passed = rerun.status === 'passed';
+      attempts.push({ n, verdict, reason, accepted: true, passed, error: passed ? undefined : rerun.error });
+      if (passed) {
+        store.saveTestVersion(site, journeyId, `healed-${store.listTestVersions(site, journeyId).length}`, patched);
+        diff = createTwoFilesPatch(`${journeyId}.spec.ts (original)`, `${journeyId}.spec.ts (healed)`, original, patched, '', '', { context: 3 });
+        outcome = 'healed';
+        break;
+      }
+      current = patched;
       last = rerun;
-      feedback.push(`Attempt ${n}: you called it flaky/environment but a plain re-run still failed: ${(rerun.error ?? '').slice(0, 500)}`);
-      continue;
+      feedback.push(`Attempt ${n}: your patch ran but still failed with: ${(rerun.error ?? '').slice(0, 600)}`);
     }
-
-    const reject = (rejection: string) => { attempts.push({ n, verdict, reason, accepted: false, rejection }); feedback.push(`Attempt ${n} rejected: ${rejection}`); };
-    if (!out.code) { reject('verdict was test_breakage but no code was returned'); continue; }
-    const patched = stripFences(out.code);
-    if (patched === current) { reject('patch is identical to the current code'); continue; }
-    const weak = weakensAssertions(original, patched);
-    if (weak) { reject(weak); continue; }
-    const v = await validateSpec(patched);
-    if (!v.ok) { reject(`patch failed validation: ${v.errors.join('; ')}`); continue; }
-
-    store.saveTest(site, journeyId, patched);
-    const rerun = (await opts.runner([journeyId])).results[0];
-    const passed = rerun.status === 'passed';
-    attempts.push({ n, verdict, reason, accepted: true, passed, error: passed ? undefined : rerun.error });
-    if (passed) {
-      store.saveTestVersion(site, journeyId, `healed-${store.listTestVersions(site, journeyId).length}`, patched);
-      diff = createTwoFilesPatch(`${journeyId}.spec.ts (original)`, `${journeyId}.spec.ts (healed)`, original, patched, '', '', { context: 3 });
-      outcome = 'healed';
-      break;
-    }
-    current = patched;
-    last = rerun;
-    feedback.push(`Attempt ${n}: your patch ran but still failed with: ${(rerun.error ?? '').slice(0, 600)}`);
+  } catch (e) {
+    outcome = 'failed';
+    reason = `Healing aborted by error: ${(e as Error).message}`;
+  } finally {
+    if (outcome !== 'healed') store.saveTest(site, journeyId, original); // restore: never keep a worse/unverified test
   }
-
-  if (outcome !== 'healed') store.saveTest(site, journeyId, original); // restore: never keep a worse/unverified test
   const record: HealRecord = {
     id: `${journeyId}-${new Date().toISOString().replace(/[:.]/g, '-')}`,
     journeyId, at: new Date().toISOString(), outcome, verdict, reason,
