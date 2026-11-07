@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { MockLLM } from '../src/core/llm/mock.js';
 import { Store } from '../src/core/storage.js';
-import { healTest } from '../src/core/healer.js';
-import type { RunRecord, TestResult } from '../src/core/types.js';
+import { healTest, healSummary, HEAL_SYSTEM } from '../src/core/healer.js';
+import type { HealRecord, RunRecord, TestResult } from '../src/core/types.js';
 import { FAILING_SPEC, HEALED_SPEC } from './helpers/specs.js';
 
 const SITE = 'h.test';
@@ -112,5 +112,80 @@ describe('healTest', () => {
     const llm = new MockLLM(() => ({ verdict: 'app_bug', reason: 'x' }));
     await healTest(store, llm, { ...base(), failure: { ...failure, failure: { ...failure.failure!, screenshot: 'screenshots/f.png' } }, runner: async () => rec('passed') });
     expect(llm.calls[0].images).toHaveLength(1);
+  });
+});
+
+describe('SPEC-006: last error and candidate patches', () => {
+  const patching = () => new MockLLM((_r, i) => ({ verdict: 'test_breakage', reason: `diagnosis ${i}`, code: HEALED_SPEC + `\n// attempt ${i}\n` }));
+
+  it('AC-1: failed heal records the last re-run error (truncated to 4000)', async () => {
+    let n = 0;
+    const r = await healTest(store, patching(), { ...base(), runner: async () => rec('failed', `error ${++n} ` + 'x'.repeat(5000)) });
+    expect(r.outcome).toBe('failed');
+    expect(r.lastError).toMatch(/^error 2 /);
+    expect(r.lastError).toHaveLength(4000);
+    expect(store.loadHeals(SITE)[0].lastError).toBe(r.lastError);
+  });
+
+  it('AC-2: headline shows the last error first, then the diagnosis', () => {
+    const h = { journeyId: 'j', outcome: 'failed', reason: 'ambiguous option locator', lastError: 'Error: toHaveURL failed\nline two' } as HealRecord;
+    const text = healSummary(h);
+    expect(text.indexOf('toHaveURL failed')).toBeGreaterThan(-1);
+    expect(text.indexOf('toHaveURL failed')).toBeLessThan(text.indexOf('ambiguous option locator'));
+    expect(text).toMatch(/last error: Error: toHaveURL failed/);
+    expect(text).toMatch(/last diagnosis: ambiguous option locator/);
+    expect(text).not.toContain('line two');
+    expect(healSummary({ journeyId: 'j', outcome: 'healed', reason: 'fixed' } as HealRecord)).toBe('j: healed — fixed');
+    expect(healSummary({ journeyId: 'j', outcome: 'failed', reason: 'Healing aborted by error: x' } as HealRecord)).toBe('j: failed — Healing aborted by error: x');
+  });
+
+  it('AC-3: healed and app_bug records have no lastError or candidateDiff', async () => {
+    const healed = await healTest(store, new MockLLM(() => ({ verdict: 'test_breakage', reason: 'r', code: HEALED_SPEC })), { ...base(), runner: async () => rec('passed') });
+    expect(healed.lastError).toBeUndefined(); expect(healed.candidateDiff).toBeUndefined();
+    store.saveTest(SITE, 'contact', FAILING_SPEC);
+    const bug = await healTest(store, new MockLLM(() => ({ verdict: 'app_bug', reason: 'broken' })), { ...base(), runner: async () => rec('passed') });
+    expect(bug.lastError).toBeUndefined(); expect(bug.candidateDiff).toBeUndefined();
+  });
+
+  it('AC-4: flaky verdict whose re-run still fails -> failed, lastError set, no candidate', async () => {
+    const llm = new MockLLM(() => ({ verdict: 'flaky_or_environment', reason: 'timing' }));
+    const r = await healTest(store, llm, { ...base(), runner: async () => rec('failed', 'still red') });
+    expect(r.outcome).toBe('failed');
+    expect(r.lastError).toBe('still red');
+    expect(r.candidateDiff).toBeUndefined();
+    expect(store.listTestVersions(SITE, 'contact').some((v) => v.startsWith('candidate-'))).toBe(false);
+  });
+
+  it('AC-5: last failed patch is kept as a non-active candidate version with its diff', async () => {
+    const r = await healTest(store, patching(), { ...base(), runner: async () => rec('failed', 'nope') });
+    const cand = store.listTestVersions(SITE, 'contact').filter((v) => v.startsWith('candidate-'));
+    expect(cand).toHaveLength(1);
+    expect(store.loadTestVersion(SITE, 'contact', cand[0])).toBe(HEALED_SPEC + '\n// attempt 1\n');
+    expect(r.candidateDiff).toMatch(/\+\/\/ attempt 1/);
+    expect(r.candidateDiff).toMatch(/-.*Your full name/);
+    expect(store.loadTest(SITE, 'contact')).toBe(FAILING_SPEC);
+  });
+
+  it('AC-6: no candidate when every patch is rejected', async () => {
+    const llm = new MockLLM(() => ({ verdict: 'test_breakage', reason: 'x', code: FAILING_SPEC }));
+    const r = await healTest(store, llm, { ...base(), runner: async () => rec('passed') });
+    expect(r.outcome).toBe('failed');
+    expect(r.candidateDiff).toBeUndefined();
+    expect(r.lastError).toBeUndefined();
+    expect(store.listTestVersions(SITE, 'contact').some((v) => v.startsWith('candidate-'))).toBe(false);
+  });
+
+  it('AC-7: the heal prompt asks for all justified findings without weakening assertions', () => {
+    expect(HEAL_SYSTEM).toMatch(/review the whole test/i);
+    expect(HEAL_SYSTEM).toMatch(/every one/i);
+    expect(HEAL_SYSTEM).toMatch(/NEVER delete, weaken/);
+  });
+
+  it('AC-10: an LLM error keeps the abort reason and sets no lastError', async () => {
+    const llm = new MockLLM((_r, i) => { if (i === 1) throw new Error('API 529'); return { verdict: 'test_breakage', reason: 'x', code: HEALED_SPEC }; });
+    const r = await healTest(store, llm, { ...base(), runner: async () => rec('failed', 'still broken') });
+    expect(r.outcome).toBe('failed');
+    expect(r.reason).toMatch(/Healing aborted by error: API 529/);
+    expect(r.lastError).toBeUndefined();
   });
 });

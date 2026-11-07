@@ -8,6 +8,7 @@ import { listAwsProfiles } from '../core/aws-profiles.js';
 import { loadConfig, type PartialConfig, type Config } from '../core/config.js';
 import { parseJourneys, setStatus } from '../core/journeys.js';
 import { listModels, resolveModelId, PROVIDERS, type ProviderId } from '../core/llm/models.js';
+import { healSummary } from '../core/healer.js';
 import { createContext, discover, generate, heal, run, runAll, type Context } from '../core/pipeline.js';
 import { Store, normalizeSite } from '../core/storage.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
@@ -149,7 +150,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const r = await run(ctx, url, { journeyIds: o.journey });
       printRun(r);
       const heals = await heal(ctx, url, r);
-      for (const h of heals) console.log(`  ${h.journeyId}: ${h.outcome} — ${h.reason}`);
+      for (const h of heals) console.log(`  ${healSummary(h)}`);
       if (heals.some((h) => h.outcome !== 'healed' && h.outcome !== 'flaky_or_environment')) setExit(1);
     });
 

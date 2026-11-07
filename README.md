@@ -6,7 +6,7 @@ LLM-driven end-to-end testing on Playwright. Point it at a URL and it will:
 2. **Plan** — ask an LLM to propose user journeys (search, login, signup, add-to-cart, contact form…), then rank/select which to automate.
 3. **Generate** — have the LLM write Playwright Test (TypeScript) specs, type-checked before they are saved (with error-feedback retries).
 4. **Run** — execute them with the real Playwright runner; collect results, traces, screenshots, DOM snapshots at failure.
-5. **Heal** — when a test fails, send code + error + page snapshot + screenshot to the LLM, get a verdict (`test_breakage` / `app_bug` / `flaky_or_environment`) and a patch, re-run, up to N attempts. Originals and healed versions + diffs are kept. Patches that remove or weaken assertions are rejected.
+5. **Heal** — when a test fails, send code + error + page snapshot + screenshot to the LLM, get a verdict (`test_breakage` / `app_bug` / `flaky_or_environment`) and a patch, re-run, up to N attempts. Originals and healed versions + diffs are kept; when every attempt fails, the last patch that was re-run is kept as a non-active `candidate-<n>` version (with its diff and the final error in the heal log) for you to review. Patches that remove or weaken assertions are rejected.
 
 Everything is stored per site and reused on later runs. Use it from the **CLI** or the **web UI**.
 
@@ -151,7 +151,7 @@ export default {
 | `maxPages` / `maxDepth` / `timeoutMs` | `15` / `2` / `120000` | crawl bounds (same-origin only) |
 | `maxJourneys` | `5` | journeys to automate |
 | `include` / `exclude` | `[]` | filters on journey name/goal/tags |
-| `healAttempts` | `2` | `0` disables healing |
+| `healAttempts` | `3` | `0` disables healing |
 | `codegenRetries` | `2` | retries with compiler feedback |
 | `requireApproval` | `false` | only generate journeys with status `approved` |
 | `testTimeoutMs` | `30000` | per-test timeout (action/expect timeouts are a third of it) |
@@ -163,7 +163,7 @@ pnpm build && node bin/agentic-e2e.js serve        # http://localhost:4173
 # or for UI development: pnpm dev:server  (API on :4173)  +  pnpm web:dev  (Vite on :5173, proxies /api)
 ```
 
-Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), and trigger Discover / Generate / Run / Heal / Run all. Progress streams live (SSE). Per site you get tabs for **journeys** (inline edit, approve/reject, save), **code** (current + original/healed versions), **runs** (results, errors, traces, screenshots), **heals** (verdict, reason, attempts, diff) and **screenshots** (gallery).
+Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), and trigger Discover / Generate / Run / Heal / Run all. Progress streams live (SSE). Per site you get tabs for **journeys** (inline edit, approve/reject, save), **code** (current + original/healed versions), **runs** (results, errors, traces, screenshots), **heals** (verdict, reason, attempts, diff; for failed heals the last error and the candidate patch) and **screenshots** (gallery).
 
 > ⚠️ The server executes LLM-generated Playwright tests and spends API credits. It binds to `127.0.0.1` and rejects cross-origin mutating requests; do not expose it publicly or add auth-less port forwarding.
 
