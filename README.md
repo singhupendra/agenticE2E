@@ -14,16 +14,68 @@ Spec: [`specs/SPEC-001-agentic-e2e-platform.md`](specs/SPEC-001-agentic-e2e-plat
 
 ## Setup
 
-Requires Node 20+, pnpm.
+### Prerequisites
+
+- **Node.js 20+** and **[pnpm](https://pnpm.io/installation)**
+- An LLM provider — one of:
+  - **Anthropic API** key (`ANTHROPIC_API_KEY`), or
+  - **Claude on Amazon Bedrock**: AWS credentials (env vars, profile/SSO, role, or `AWS_BEARER_TOKEN_BEDROCK`), a region, and Bedrock model access enabled for the model in your AWS account
+- Network access to the site you want to test
+
+### Install
 
 ```bash
+git clone https://github.com/singhupendra/agenticE2E.git
+cd agenticE2E
 pnpm install
 pnpm exec playwright install chromium     # browser used for crawling + tests
-export ANTHROPIC_API_KEY=sk-ant-...       # not needed for run / list / serve-without-LLM-jobs
-# ...or use Claude on Amazon Bedrock instead (standard AWS credentials: env, profile/SSO, role, or AWS_BEARER_TOKEN_BEDROCK):
-#   agentic-e2e all https://example.com --provider bedrock --aws-region us-east-1 --model claude-sonnet-5-5
-#   (needs Bedrock model access enabled for that model/region in your AWS account)
-pnpm build                                # compiles CLI + builds the web UI
+```
+
+### Configure the LLM provider
+
+```bash
+# Anthropic (default)
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# ...or Amazon Bedrock
+export AWS_PROFILE=my-profile             # or any standard AWS credential source
+export AGENTIC_E2E_PROVIDER=bedrock
+export AGENTIC_E2E_AWS_REGION=us-east-1   # or AWS_REGION
+# (if using SSO: `aws sso login --profile my-profile` first)
+```
+
+Credentials are only needed when something actually calls the LLM (new discovery, code generation, healing failures — i.e. `discover`, `generate`, `heal`, `all` and the matching UI jobs). `run`, `journeys`, `list`, `models` and `serve` itself start without them. Provider/model can also be set per command with `--provider`, `--model`, `--aws-region` (see [Configuration](#configuration)).
+
+### Build (optional)
+
+```bash
+pnpm build        # compiles the CLI to dist/ and the web UI to web/dist/
+```
+
+Only needed for `node bin/agentic-e2e.js …`, the `agentic-e2e` binary, and serving the web UI. `pnpm cli …` runs straight from source.
+
+### Verify the install
+
+```bash
+pnpm typecheck
+pnpm test:run     # no API key or network needed; requires Chromium from the step above
+```
+
+## Quick start
+
+Run the whole pipeline (discover → generate → run → heal) against a site:
+
+```bash
+pnpm cli all https://example.com
+```
+
+Results land in `./data/sites/<host>/` (journeys, generated specs, run results, screenshots, heal logs — see [Data layout](#data-layout)). Re-run just the stored tests any time with `pnpm cli run https://example.com`.
+
+Prefer a UI?
+
+```bash
+pnpm build
+node bin/agentic-e2e.js serve             # open http://localhost:4173
 ```
 
 ## CLI
