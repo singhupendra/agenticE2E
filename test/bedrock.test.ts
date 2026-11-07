@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { createBedrockProvider } from '../src/core/llm/bedrock.js';
 import { createLLMProvider } from '../src/core/llm/index.js';
 import { resolveConfig } from '../src/core/config.js';
+import { fakeAwsFiles, SAMPLE_CONFIG, SAMPLE_CREDENTIALS } from './helpers/aws-files.js';
 
 const schema = z.object({ code: z.string() });
 const fakeClient = () => {
@@ -42,6 +43,55 @@ describe('Bedrock provider (SPEC-002)', () => {
     await createBedrockProvider({ model: 'claude-haiku-4-5', awsRegion: 'us-east-1', createClient: () => g.client }).structured(req);
     expect(g.calls[0].tool_choice).toEqual({ type: 'tool', name: 't' });
     expect(g.calls[0].system).toBe('s');
+  });
+
+  describe('AWS profile (SPEC-003)', () => {
+    const aws = () => fakeAwsFiles(SAMPLE_CONFIG, SAMPLE_CREDENTIALS);
+    const seen = () => {
+      const calls: { awsRegion: string; awsProfile?: string }[] = [];
+      return { calls, createClient: (o: { awsRegion: string; awsProfile?: string }) => { calls.push(o); return fakeClient().client; } };
+    };
+
+    it('AC-7: passes the selected profile to the client; none -> undefined', () => {
+      const s = seen();
+      createBedrockProvider({ model: 'm', awsProfile: 'dev', env: aws(), createClient: s.createClient });
+      createBedrockProvider({ model: 'm', awsRegion: 'us-east-1', env: aws(), createClient: s.createClient });
+      expect(s.calls[0]).toEqual({ awsRegion: 'eu-west-1', awsProfile: 'dev' });
+      expect(s.calls[1].awsProfile).toBeUndefined();
+    });
+
+    it('AC-8: region precedence awsRegion > profile region > AWS_REGION > AWS_DEFAULT_REGION', () => {
+      const s = seen();
+      const e = (extra: Record<string, string> = {}) => ({ ...aws(), ...extra });
+      createBedrockProvider({ model: 'm', awsProfile: 'dev', awsRegion: 'ap-south-1', env: e(), createClient: s.createClient });
+      createBedrockProvider({ model: 'm', awsProfile: 'dev', env: e({ AWS_REGION: 'us-west-2' }), createClient: s.createClient });
+      createBedrockProvider({ model: 'm', env: e({ AWS_REGION: 'us-west-2' }), createClient: s.createClient });
+      createBedrockProvider({ model: 'm', awsProfile: 'ci', env: e({ AWS_DEFAULT_REGION: 'ca-central-1' }), createClient: s.createClient });
+      expect(s.calls.map((c) => c.awsRegion)).toEqual(['ap-south-1', 'eu-west-1', 'us-west-2', 'ca-central-1']);
+    });
+
+    it('AC-9: unknown profile -> error naming it and the available ones', () => {
+      expect(() => createBedrockProvider({ model: 'm', awsProfile: 'ghost', awsRegion: 'us-east-1', env: aws(), createClient: seen().createClient }))
+        .toThrow(/ghost.*(ci, default, dev|available)/is);
+      expect(() => createBedrockProvider({ model: 'm', awsProfile: 'ghost', awsRegion: 'us-east-1', env: fakeAwsFiles(), createClient: seen().createClient }))
+        .toThrow(/ghost/);
+    });
+
+    it('missing region error mentions the profile region', () => {
+      expect(() => createBedrockProvider({ model: 'm', awsProfile: 'ci', env: aws(), createClient: seen().createClient })).toThrow(/AWS_REGION/);
+    });
+
+    it('AC-10: anthropic provider ignores awsProfile and never reads AWS files', () => {
+      const cfg = resolveConfig({ cli: { provider: 'anthropic', awsProfile: 'ghost' } });
+      expect(createLLMProvider(cfg, { apiKey: 'k', env: fakeAwsFiles() })).toMatchObject({ provider: 'anthropic' });
+    });
+
+    it('factory passes awsProfile through from config', () => {
+      const s = seen();
+      const cfg = resolveConfig({ cli: { provider: 'bedrock', awsProfile: 'dev', awsRegion: 'us-east-1' } });
+      createLLMProvider(cfg, { env: aws(), createBedrockClient: s.createClient });
+      expect(s.calls[0]).toEqual({ awsRegion: 'us-east-1', awsProfile: 'dev' });
+    });
   });
 
   it('AC-14: factory picks the provider from config', () => {

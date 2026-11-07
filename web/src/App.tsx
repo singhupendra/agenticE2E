@@ -124,6 +124,29 @@ function ModelPicker({ provider, model, onChange }: { provider: Settings['provid
   );
 }
 
+/** Bedrock credentials: pick a named AWS profile found on the server's machine, or the default credential chain. */
+function AwsProfilePicker({ value, onChange }: { value: string | null | undefined; onChange: (p: string | null) => void }) {
+  const [profiles, setProfiles] = useState<string[]>([]);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    let live = true;
+    api.awsProfiles().then((r) => { if (live) setProfiles(r.profiles); }).catch((e) => { if (live) setError(String(e.message)); });
+    return () => { live = false; };
+  }, []);
+  // A configured profile that is not (or no longer) in the AWS files is still shown so it is not silently dropped.
+  const options = value && !profiles.includes(value) ? [value, ...profiles] : profiles;
+  return (
+    <label>AWS profile
+      <select value={value ?? ''} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Default credential chain</option>
+        {options.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+      {error && <small className="muted">Could not load profiles: {error}</small>}
+      {!error && !profiles.length && <small className="muted">No profiles found in ~/.aws — run <code>aws configure --profile name</code>.</small>}
+    </label>
+  );
+}
+
 function SettingsForm({ s, set }: { s: Settings; set: (s: Settings) => void }) {
   const up = <K extends keyof Settings>(k: K, v: Settings[K]) => set({ ...s, [k]: v });
   const list = (v: string) => v.split(',').map((x) => x.trim()).filter(Boolean);
@@ -148,6 +171,7 @@ function SettingsForm({ s, set }: { s: Settings; set: (s: Settings) => void }) {
           </select>
         </label>
         <ModelPicker provider={s.provider} model={s.model} onChange={(m) => up('model', m)} />
+        {s.provider === 'bedrock' && <AwsProfilePicker value={s.awsProfile} onChange={(p) => up('awsProfile', p)} />}
         <label>Include <input defaultValue={s.include.join(', ')} onBlur={(e) => up('include', list(e.target.value))} placeholder="search, checkout" /></label>
         <label>Exclude <input defaultValue={s.exclude.join(', ')} onBlur={(e) => up('exclude', list(e.target.value))} placeholder="login" /></label>
         <label className="check"><input type="checkbox" checked={s.requireApproval} onChange={(e) => up('requireApproval', e.target.checked)} /> Only generate approved journeys</label>

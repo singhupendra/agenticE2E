@@ -68,4 +68,19 @@ describe('config', () => {
     for (const r of ['us-east-1; evil', '../x', 'evil.com/x', 'US-EAST-1']) expect(() => resolveConfig({ cli: { awsRegion: r } })).toThrow(/awsRegion/);
     for (const r of ['us-east-1', 'ap-southeast-1', 'eu-central-2']) expect(resolveConfig({ cli: { awsRegion: r } }).awsRegion).toBe(r);
   });
+
+  it('SPEC-003 AC-1: awsProfile defaults to undefined', () => {
+    expect(resolveConfig({}).awsProfile).toBeUndefined();
+  });
+
+  it('SPEC-003 AC-2: awsProfile precedence file < env < cli', () => {
+    expect(resolveConfig({ file: { awsProfile: 'a' } }).awsProfile).toBe('a');
+    expect(resolveConfig({ file: { awsProfile: 'a' }, env: { AGENTIC_E2E_AWS_PROFILE: 'b' } }).awsProfile).toBe('b');
+    expect(resolveConfig({ file: { awsProfile: 'a' }, env: { AGENTIC_E2E_AWS_PROFILE: 'b' }, cli: { awsProfile: 'c' } }).awsProfile).toBe('c');
+  });
+
+  it('SPEC-003 AC-3: rejects unsafe profile names, accepts normal ones', () => {
+    for (const p of ['x; rm -rf', '-bad', 'a b', '../x', 'a'.repeat(129)]) expect(() => resolveConfig({ cli: { awsProfile: p } })).toThrow(/awsProfile/);
+    for (const p of ['default', 'my-profile', 'corp.sso_admin', 'user@acct:role']) expect(resolveConfig({ cli: { awsProfile: p } }).awsProfile).toBe(p);
+  });
 });

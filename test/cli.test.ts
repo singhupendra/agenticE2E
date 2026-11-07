@@ -5,6 +5,7 @@ import path from 'node:path';
 import { main } from '../src/cli/index.js';
 import { Store } from '../src/core/storage.js';
 import type { Journey } from '../src/core/types.js';
+import { fakeAwsFiles, SAMPLE_CONFIG, SAMPLE_CREDENTIALS } from './helpers/aws-files.js';
 
 const j = (id: string, status: Journey['status'] = 'selected'): Journey => ({ id, name: `Journey ${id}`, goal: 'g', priority: 'high', tags: [], steps: ['a'], status });
 let dir: string, out: string[], err: string[];
@@ -72,5 +73,34 @@ describe('cli', () => {
     expect(out.join('\n')).not.toContain('anthropic.claude');
     expect(await cli('models', '--provider', 'nope')).toBe(1);
     expect(err.join('\n')).toMatch(/provider/);
+  });
+
+  describe('SPEC-003 aws-profiles', () => {
+    const saved = { c: process.env.AWS_CONFIG_FILE, k: process.env.AWS_SHARED_CREDENTIALS_FILE };
+    afterEach(() => {
+      for (const [n, v] of [['AWS_CONFIG_FILE', saved.c], ['AWS_SHARED_CREDENTIALS_FILE', saved.k]] as const) {
+        if (v === undefined) delete process.env[n]; else process.env[n] = v;
+      }
+    });
+
+    it('AC-11: lists discovered profiles and marks the configured one', async () => {
+      Object.assign(process.env, fakeAwsFiles(SAMPLE_CONFIG, SAMPLE_CREDENTIALS));
+      expect(await cli('aws-profiles', '--aws-profile', 'dev')).toBe(0);
+      const text = out.join('\n');
+      for (const p of ['ci', 'default', 'dev']) expect(text).toContain(p);
+      expect(text).toMatch(/dev.*<- selected/);
+      expect(text).not.toMatch(/SUPERSECRET/);
+    });
+
+    it('AC-11: no profiles -> exit 0 with a hint', async () => {
+      Object.assign(process.env, fakeAwsFiles());
+      expect(await cli('aws-profiles')).toBe(0);
+      expect(out.join('\n')).toMatch(/no aws profiles/i);
+    });
+
+    it('models --provider bedrock mentions --aws-profile', async () => {
+      expect(await cli('models', '--provider', 'bedrock')).toBe(0);
+      expect(out.join('\n')).toContain('--aws-profile');
+    });
   });
 });

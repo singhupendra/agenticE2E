@@ -4,10 +4,12 @@ import os from 'node:os';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/server/app.js';
+import { mergeJobConfig, parseJobRequest } from '../src/server/jobs.js';
 import { resolveConfig } from '../src/core/config.js';
 import { MockLLM } from '../src/core/llm/mock.js';
 import { Store } from '../src/core/storage.js';
 import { startFixtureSite, type Fixture } from './helpers/fixture-site.js';
+import { fakeAwsFiles, SAMPLE_CONFIG, SAMPLE_CREDENTIALS } from './helpers/aws-files.js';
 
 let fx: Fixture, app: FastifyInstance, store: Store, dataDir: string;
 beforeAll(async () => {
@@ -152,5 +154,56 @@ describe('server', () => {
     const post = (options: unknown) => app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: 'http://spec2.test', options } });
     expect((await post({ provider: 'bedrock', model: 'anthropic.claude-opus-5-5' })).statusCode).toBe(202);
     expect((await post({ awsRegion: 'us-east-1' })).statusCode).toBe(400);
+  });
+
+  describe('SPEC-003 AWS profiles', () => {
+    let pApp: FastifyInstance;
+    beforeAll(async () => {
+      const env = fakeAwsFiles(SAMPLE_CONFIG, SAMPLE_CREDENTIALS);
+      pApp = await buildApp({ config: resolveConfig({ cli: { dataDir, provider: 'bedrock', awsRegion: 'us-east-1', awsProfile: 'dev' } }), awsEnv: env, webDir: path.join(dataDir, 'no-web') });
+    });
+    afterAll(async () => { await pApp.close(); });
+
+    it('AC-12: GET /api/aws-profiles lists profile names and the configured one', async () => {
+      const r = await pApp.inject('/api/aws-profiles');
+      expect(r.statusCode).toBe(200);
+      expect(r.json()).toEqual({ profiles: ['ci', 'default', 'dev', 'weird-region'], selected: 'dev' });
+      expect(r.body).not.toMatch(/SUPERSECRET|AKIA/);
+    });
+
+    it('AC-14: /api/config exposes awsProfile (not awsRegion) and round-trips as job options', async () => {
+      const c = (await pApp.inject('/api/config')).json();
+      expect(c.awsProfile).toBe('dev');
+      expect(c.awsRegion).toBeUndefined();
+      const res = await pApp.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: 'http://spec3-roundtrip.test', options: c } });
+      expect(res.statusCode).toBe(202);
+    });
+
+    it('AC-13: job awsProfile must be a known profile; awsRegion still rejected', async () => {
+      const post = (options: unknown) => pApp.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: 'http://spec3.test', options } });
+      expect((await post({ provider: 'bedrock', awsProfile: 'ci' })).statusCode).toBe(202);
+      const bad = await post({ awsProfile: 'ghost' });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().error).toMatch(/ghost/);
+      expect((await post({ awsProfile: 'x; evil' })).statusCode).toBe(400);
+      expect((await post({ awsRegion: 'us-east-1' })).statusCode).toBe(400);
+    });
+
+    it('AC-15: null clears the configured profile; unknown profile ignored for anthropic', async () => {
+      const base = resolveConfig({ cli: { dataDir, provider: 'bedrock', awsRegion: 'us-east-1', awsProfile: 'dev' } });
+      expect(mergeJobConfig(base, { awsProfile: null }).awsProfile).toBeUndefined();
+      expect(mergeJobConfig(base, { awsProfile: 'ci' }).awsProfile).toBe('ci');
+      expect(mergeJobConfig(base, {}).awsProfile).toBe('dev');
+      expect(parseJobRequest({ action: 'run', url: 'http://x.test', options: { awsProfile: null } }).options).toEqual({ awsProfile: null });
+      const post = (options: unknown) => pApp.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: 'http://spec3-null.test', options } });
+      expect((await post({ awsProfile: null })).statusCode).toBe(202);
+      expect((await post({ provider: 'anthropic', awsProfile: 'ghost' })).statusCode).toBe(202);
+    });
+
+    it('selected is omitted when no profile is configured', async () => {
+      const r = (await app.inject('/api/aws-profiles')).json();
+      expect(r.selected).toBeUndefined();
+      expect(Array.isArray(r.profiles)).toBe(true);
+    });
   });
 });
