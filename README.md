@@ -20,6 +20,9 @@ Requires Node 20+, pnpm.
 pnpm install
 pnpm exec playwright install chromium     # browser used for crawling + tests
 export ANTHROPIC_API_KEY=sk-ant-...       # not needed for run / list / serve-without-LLM-jobs
+# ...or use Claude on Amazon Bedrock instead (standard AWS credentials: env, profile/SSO, role, or AWS_BEARER_TOKEN_BEDROCK):
+#   agentic-e2e all https://example.com --provider bedrock --aws-region us-east-1 --model claude-sonnet-5-5
+#   (needs Bedrock model access enabled for that model/region in your AWS account)
 pnpm build                                # compiles CLI + builds the web UI
 ```
 
@@ -38,10 +41,11 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `run <url>` | run stored tests (`--journey <ids…>` for a subset). Exits 1 on any failure |
 | `heal <url>` | run tests, then self-heal failures |
 | `all <url>` | discover → select → generate → run → heal |
+| `models` | list known Claude models for `--provider anthropic\|bedrock` |
 | `list` | known sites with journey/test/run counts |
 | `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`) |
 
-Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--model <id>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`. Patterns are case-insensitive substrings, or `/regex/flags`.
+Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`. Patterns are case-insensitive substrings, or `/regex/flags`.
 
 Typical review-before-codegen workflow:
 
@@ -69,7 +73,9 @@ export default {
 
 | Option | Default | Notes |
 |---|---|---|
-| `model` | `claude-sonnet-5-5` | env `AGENTIC_E2E_MODEL` |
+| `provider` | `anthropic` | `anthropic` \| `bedrock`; env `AGENTIC_E2E_PROVIDER`, flag `--provider` |
+| `model` | `claude-sonnet-5-5` | env `AGENTIC_E2E_MODEL`. Pick from `agentic-e2e models` or the UI dropdown, or give any id; on Bedrock bare ids get the `anthropic.` prefix |
+| `awsRegion` | – | Bedrock only; env `AGENTIC_E2E_AWS_REGION`, flag `--aws-region`, else `AWS_REGION` / `AWS_DEFAULT_REGION` |
 | `maxTokens` | `8000` | per LLM response |
 | `screenshots` | `on-failure` | `off` \| `on-failure` \| `every-step` \| `end-of-journey`; env `AGENTIC_E2E_SCREENSHOTS` |
 | `fullPage` | `false` | full-page screenshots; env `AGENTIC_E2E_FULL_PAGE` |

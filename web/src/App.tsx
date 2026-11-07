@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ModelInfo } from '../../src/core/llm/models';
 import type { HealRecord, Journey, ProgressEvent } from '../../src/core/types';
 import { api, streamJob, type RunDetail, type Settings, type SiteDetail, type SiteSummary, type TestDetail } from './api';
 
@@ -93,6 +94,36 @@ export function App() {
   );
 }
 
+const CUSTOM = '__custom__';
+
+/** Dropdown of known models for the provider, with a "Custom…" escape hatch for any other id. */
+function ModelPicker({ provider, model, onChange }: { provider: Settings['provider']; model: string; onChange: (m: string) => void }) {
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [custom, setCustom] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api.models(provider).then((r) => { if (live) setModels(r.models); }).catch(() => { if (live) setModels([]); });
+    return () => { live = false; };
+  }, [provider]);
+  // Keep the id valid for the provider: bare ids <-> `anthropic.`-prefixed Bedrock ids (the server accepts both, this just keeps the dropdown in sync).
+  useEffect(() => {
+    if (models.length && !custom && !models.some((m) => m.id === model)) {
+      const swapped = provider === 'bedrock' ? `anthropic.${model}` : model.replace(/^anthropic\./, '');
+      if (models.some((m) => m.id === swapped)) onChange(swapped); else setCustom(true);
+    }
+  }, [models, model, custom, provider, onChange]);
+  const known = models.some((m) => m.id === model);
+  return (
+    <label>Model
+      <select value={custom || !known ? CUSTOM : model} onChange={(e) => { if (e.target.value === CUSTOM) setCustom(true); else { setCustom(false); onChange(e.target.value); } }}>
+        {models.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+        <option value={CUSTOM}>Custom…</option>
+      </select>
+      {(custom || !known) && <input value={model} onChange={(e) => onChange(e.target.value)} placeholder={provider === 'bedrock' ? 'anthropic.claude-… or us.anthropic.claude-…' : 'claude-…'} />}
+    </label>
+  );
+}
+
 function SettingsForm({ s, set }: { s: Settings; set: (s: Settings) => void }) {
   const up = <K extends keyof Settings>(k: K, v: Settings[K]) => set({ ...s, [k]: v });
   const list = (v: string) => v.split(',').map((x) => x.trim()).filter(Boolean);
@@ -110,7 +141,13 @@ function SettingsForm({ s, set }: { s: Settings; set: (s: Settings) => void }) {
         <label>Max pages <input type="number" min={1} value={s.maxPages} onChange={(e) => up('maxPages', Number(e.target.value))} /></label>
         <label>Max depth <input type="number" min={0} value={s.maxDepth} onChange={(e) => up('maxDepth', Number(e.target.value))} /></label>
         <label>Heal attempts <input type="number" min={0} value={s.healAttempts} onChange={(e) => up('healAttempts', Number(e.target.value))} /></label>
-        <label>Model <input value={s.model} onChange={(e) => up('model', e.target.value)} /></label>
+        <label>Provider
+          <select value={s.provider} onChange={(e) => up('provider', e.target.value as Settings['provider'])}>
+            <option value="anthropic">Anthropic API</option>
+            <option value="bedrock">Amazon Bedrock</option>
+          </select>
+        </label>
+        <ModelPicker provider={s.provider} model={s.model} onChange={(m) => up('model', m)} />
         <label>Include <input defaultValue={s.include.join(', ')} onBlur={(e) => up('include', list(e.target.value))} placeholder="search, checkout" /></label>
         <label>Exclude <input defaultValue={s.exclude.join(', ')} onBlur={(e) => up('exclude', list(e.target.value))} placeholder="login" /></label>
         <label className="check"><input type="checkbox" checked={s.requireApproval} onChange={(e) => up('requireApproval', e.target.checked)} /> Only generate approved journeys</label>

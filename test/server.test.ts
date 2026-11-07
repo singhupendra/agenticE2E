@@ -133,4 +133,24 @@ describe('server', () => {
     const ok = await app.inject({ method: 'POST', url: '/api/jobs', headers: { origin: 'http://localhost:4173', host: 'localhost:4173' }, payload: { action: 'run', url: 'http://same-origin-ok.test' } });
     expect(ok.statusCode).toBe(202);
   });
+
+  it('SPEC-002 AC-8: GET /api/models returns the per-provider catalog', async () => {
+    const b = await app.inject('/api/models?provider=bedrock');
+    expect(b.statusCode).toBe(200);
+    expect(b.json().provider).toBe('bedrock');
+    expect(b.json().models.map((m: { id: string }) => m.id)).toContain('anthropic.claude-sonnet-5-5');
+    expect((await app.inject('/api/models?provider=nope')).statusCode).toBe(400);
+    const d = (await app.inject('/api/models')).json();
+    expect(d.provider).toBe('anthropic');
+    expect(d.models.map((m: { id: string }) => m.id)).toContain('claude-sonnet-5-5');
+  });
+
+  it('SPEC-002 AC-15/16: provider is a job option, awsRegion is not; config exposes provider only', async () => {
+    const c = (await app.inject('/api/config')).json();
+    expect(c.provider).toBe('anthropic');
+    expect(c.awsRegion).toBeUndefined();
+    const post = (options: unknown) => app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: 'http://spec2.test', options } });
+    expect((await post({ provider: 'bedrock', model: 'anthropic.claude-opus-5-5' })).statusCode).toBe(202);
+    expect((await post({ awsRegion: 'us-east-1' })).statusCode).toBe(400);
+  });
 });

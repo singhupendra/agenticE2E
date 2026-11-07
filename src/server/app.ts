@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import type { Config } from '../core/config.js';
 import { parseJourneys } from '../core/journeys.js';
+import { listModels, PROVIDERS, type ProviderId } from '../core/llm/models.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { packageRoot } from '../core/paths.js';
 import { Store } from '../core/storage.js';
@@ -52,8 +53,13 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
 
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
-    const { dataDir: _d, maxTokens: _m, ...pub } = opts.config;
+    const { dataDir: _d, maxTokens: _m, awsRegion: _r, ...pub } = opts.config;
     return pub;
+  });
+  app.get<{ Querystring: { provider?: string } }>('/api/models', async (req, reply) => {
+    const provider = req.query.provider ?? opts.config.provider;
+    if (!(PROVIDERS as readonly string[]).includes(provider)) return reply.code(400).send({ error: `provider must be one of ${PROVIDERS.join(', ')}` });
+    return { provider, models: listModels(provider as ProviderId) };
   });
   app.get('/api/sites', async () => store.listSites().map((s) => {
     const runs = store.listRuns(s.id);
