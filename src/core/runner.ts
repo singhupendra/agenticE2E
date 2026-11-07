@@ -18,6 +18,18 @@ export interface RunOptions {
   onProgress?: ProgressFn;
 }
 
+const ENV_ALLOW = /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TEMP|TMP|LANG|LANGUAGE|TZ|SystemRoot|SYSTEMROOT|COMSPEC|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|XDG_[A-Z_]+|LC_[A-Z_]+|PLAYWRIGHT_[A-Z_]+|DISPLAY)$/;
+
+/**
+ * Minimal environment for the test subprocess. Generated specs are LLM output derived from untrusted
+ * page content, so secrets such as ANTHROPIC_API_KEY must never reach them.
+ */
+export function buildRunnerEnv(parent: NodeJS.ProcessEnv, extra: Record<string, string>): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parent)) if (v !== undefined && ENV_ALLOW.test(k)) env[k] = v;
+  return { ...env, ...extra };
+}
+
 const ANSI = /\u001b\[[0-9;]*m/g;
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -70,16 +82,15 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   const output = await new Promise<string>((resolve, reject) => {
     const child = spawn(process.execPath, [cli, 'test', '-c', configFile, ...filters], {
       cwd: rootDir,
-      env: {
-        ...process.env,
-        NODE_PATH: [path.join(rootDir, 'node_modules'), process.env.NODE_PATH].filter(Boolean).join(path.delimiter),
+      env: buildRunnerEnv(process.env, {
+        NODE_PATH: path.join(rootDir, 'node_modules'),
         AGENTIC_E2E_SCREENSHOTS: opts.screenshots,
         AGENTIC_E2E_FULL_PAGE: String(opts.fullPage),
         AGENTIC_E2E_SHOT_DIR: run.screenshotsDir,
         AGENTIC_E2E_FAILURE_DIR: failuresDir,
         FORCE_COLOR: '0',
         CI: '1',
-      },
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let buf = '';
