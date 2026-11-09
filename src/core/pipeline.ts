@@ -2,6 +2,7 @@ import path from 'node:path';
 import { generateTests, type GenerateResult } from './codegen.js';
 import type { Config } from './config.js';
 import { crawl } from './discovery.js';
+import { resolveHealSelection, type HealSelectionRequest } from './heal-selection.js';
 import { healTest } from './healer.js';
 import { createLLMProvider } from './llm/index.js';
 import type { LLMProvider } from './llm/types.js';
@@ -124,4 +125,33 @@ export async function runAll(ctx: Context, url: string, opts: { rediscover?: boo
   const summary = `${final.filter((f) => f.status === 'passed').length}/${final.length} passing (${healedIds.size} healed)`;
   ctx.onProgress({ type: 'done', stage: 'all', message: summary });
   return { site: g.site, journeys: g.journeys, reusedJourneys: g.reusedJourneys, generate: g.result, run: first, heals, final };
+}
+
+export type HealTestOutcome = HealRecord['outcome'] | 'already_passing' | 'skipped';
+export interface HealSelectedResult {
+  /** Ids that were re-run (empty when `noneFailing`). */
+  selected: string[];
+  /** `failedOnly` was requested and no test's latest outcome is failed: nothing ran. */
+  noneFailing: boolean;
+  /** The re-run of the selected tests; `null` when nothing ran. */
+  run: RunRecord | null;
+  results: { journeyId: string; outcome: HealTestOutcome }[];
+  heals: HealRecord[];
+}
+
+/** Select (and validate) tests, re-run only those, and heal only the ones that still fail. Passing ones never reach the LLM. */
+export async function healSelected(ctx: Context, url: string, selection: HealSelectionRequest = {}): Promise<HealSelectedResult> {
+  const meta = normalizeSite(url);
+  const sel = resolveHealSelection(ctx.store, meta.id, selection);
+  if (sel.ids && !sel.ids.length) {
+    ctx.onProgress({ type: 'info', stage: 'heal', message: `No failing tests to heal for ${meta.id}` });
+    return { selected: [], noneFailing: true, run: null, results: [], heals: [] };
+  }
+  const r = await run(ctx, url, { journeyIds: sel.ids ?? undefined });
+  const heals = await heal(ctx, url, r);
+  const results = r.results.map(({ journeyId, status }): { journeyId: string; outcome: HealTestOutcome } => {
+    const h = heals.find((x) => x.journeyId === journeyId);
+    return { journeyId, outcome: h ? h.outcome : status === 'passed' ? 'already_passing' : 'skipped' };
+  });
+  return { selected: r.results.map((x) => x.journeyId), noneFailing: false, run: r, results, heals };
 }

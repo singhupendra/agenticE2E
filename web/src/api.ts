@@ -11,6 +11,9 @@ export interface SiteDetail {
   meta: SiteSummary; journeys: Journey[]; pages: { path: string; title: string; depth: number; screenshot?: string }[];
   tests: { id: string; versions: string[] }[]; runs: RunSummary[]; heals: HealRecord[];
 }
+export type LastRunOutcome = 'passed' | 'failed' | 'skipped' | 'healed' | 'never_run';
+export interface TestCaseRow { journeyId: string; name: string; journeyStatus: string; lastRun: { outcome: LastRunOutcome; at?: string; error?: string } }
+export interface HealJobPayload { journeyIds?: string[]; failedOnly?: boolean }
 export interface TestDetail { id: string; code: string; versions: { name: string; code: string }[] }
 export interface RunDetail { id: string; results: { journeyId: string; status: string; durationMs: number; error?: string; screenshots: string[]; tracePath?: string; failure?: { url: string; screenshot?: string } }[] }
 
@@ -28,6 +31,7 @@ export const api = {
   sites: () => fetch('/api/sites').then((r) => j<SiteSummary[]>(r)),
   site: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}`).then((r) => j<SiteDetail>(r)),
   test: (id: string, t: string) => fetch(`/api/sites/${encodeURIComponent(id)}/tests/${encodeURIComponent(t)}`).then((r) => j<TestDetail>(r)),
+  testCases: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}/test-cases`).then((r) => j<{ tests: TestCaseRow[] }>(r)),
   run: (id: string, runId: string) => fetch(`/api/sites/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`).then((r) => j<RunDetail>(r)),
   saveJourneys: (id: string, journeys: Journey[]) => fetch(`/api/sites/${encodeURIComponent(id)}/journeys`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(journeys) }).then((r) => j<Journey[]>(r)),
   startJob: (body: unknown) => post('/api/jobs', body).then((r) => j<{ jobId: string }>(r)),

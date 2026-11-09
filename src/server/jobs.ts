@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { configSchema, type Config } from '../core/config.js';
-import { createContext, discover, generate, heal, run, runAll } from '../core/pipeline.js';
+import { createContext, discover, generate, healSelected, run, runAll } from '../core/pipeline.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { normalizeSite } from '../core/storage.js';
 import type { ProgressEvent } from '../core/types.js';
@@ -11,7 +11,7 @@ export type Action = (typeof ACTIONS)[number];
 /** Job options: any Config key a client may override; `awsProfile: null` clears a server-configured profile. */
 export type JobOptions = Omit<Partial<Config>, 'awsProfile'> & { awsProfile?: string | null };
 
-export interface JobRequest { action: Action; url: string; options?: JobOptions; journeyIds?: string[]; rediscover?: boolean; regenerate?: boolean }
+export interface JobRequest { action: Action; url: string; options?: JobOptions; journeyIds?: string[]; failedOnly?: boolean; rediscover?: boolean; regenerate?: boolean }
 export interface Job {
   id: string; action: Action; url: string; site: string; status: 'running' | 'done' | 'error'; startedAt: string; finishedAt?: string;
   events: ProgressEvent[]; result?: unknown; error?: string;
@@ -39,11 +39,13 @@ export function parseJobRequest(body: unknown): JobRequest {
   if (!opts.success) throw new Error('Invalid options: ' + opts.error.issues.map((i) => `${i.path.join('.') || 'options'}: ${i.message}`).join('; '));
   const ids = b.journeyIds;
   if (ids !== undefined && !(Array.isArray(ids) && ids.every((x) => typeof x === 'string'))) throw new Error('journeyIds must be a string array');
+  if (b.failedOnly !== undefined && typeof b.failedOnly !== 'boolean') throw new Error('failedOnly must be a boolean');
+  if (b.failedOnly !== undefined && b.action !== 'heal') throw new Error('failedOnly only applies to action "heal"');
   // zod fills in schema defaults for absent keys; keep only what the client sent, or an omitted `provider`/`model`/... would
   // silently reset the server's own configuration.
   const sent = (b.options ?? {}) as Record<string, unknown>;
   const options = Object.fromEntries(Object.entries(opts.data).filter(([k]) => k in sent)) as JobOptions;
-  return { action: b.action as Action, url: b.url, options, journeyIds: ids as string[] | undefined, rediscover: b.rediscover === true, regenerate: b.regenerate === true };
+  return { action: b.action as Action, url: b.url, options, journeyIds: ids as string[] | undefined, ...(b.failedOnly === undefined ? {} : { failedOnly: b.failedOnly }), rediscover: b.rediscover === true, regenerate: b.regenerate === true };
 }
 
 export class JobManager {
@@ -81,7 +83,7 @@ export class JobManager {
           case 'discover': { const d = await discover(ctx, req.url, { rediscover: req.rediscover }); job.result = { journeys: d.journeys.length, reused: d.reused }; break; }
           case 'generate': { const g = await generate(ctx, req.url, { regenerate: req.regenerate, rediscover: req.rediscover }); job.result = g.result; break; }
           case 'run': job.result = await run(ctx, req.url, { journeyIds: req.journeyIds }); break;
-          case 'heal': { const r = await run(ctx, req.url, { journeyIds: req.journeyIds }); job.result = { run: r, heals: await heal(ctx, req.url, r) }; break; }
+          case 'heal': job.result = await healSelected(ctx, req.url, { ids: req.journeyIds, failedOnly: req.failedOnly }); break;
           case 'all': job.result = await runAll(ctx, req.url, { rediscover: req.rediscover, regenerate: req.regenerate }); break;
         }
         job.status = 'done';

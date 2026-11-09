@@ -4,11 +4,13 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { listAwsProfiles } from '../core/aws-profiles.js';
 import type { Config } from '../core/config.js';
+import { HealSelectionError, resolveHealSelection, UnknownSiteError } from '../core/heal-selection.js';
 import { parseJourneys } from '../core/journeys.js';
 import { listModels, PROVIDERS, type ProviderId } from '../core/llm/models.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { packageRoot } from '../core/paths.js';
-import { Store } from '../core/storage.js';
+import { Store, normalizeSite } from '../core/storage.js';
+import { listTestCases } from '../core/test-cases.js';
 import { JobManager, parseJobRequest } from './jobs.js';
 
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
@@ -85,6 +87,12 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     };
   });
 
+  app.get<{ Params: { site: string } }>('/api/sites/:site/test-cases', async (req, reply) => {
+    const meta = siteOr404(req.params.site, reply);
+    if (!meta) return;
+    return listTestCases(store, meta.id);
+  });
+
   app.put<{ Params: { site: string }; Body: unknown }>('/api/sites/:site/journeys', async (req, reply) => {
     const meta = siteOr404(req.params.site, reply);
     if (!meta) return;
@@ -140,6 +148,13 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   app.post('/api/jobs', async (req, reply) => {
     let jr;
     try { jr = parseJobRequest(req.body); } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
+    if (jr.action === 'heal' && (jr.journeyIds?.length || jr.failedOnly)) {
+      try { resolveHealSelection(store, normalizeSite(jr.url).id, { ids: jr.journeyIds, failedOnly: jr.failedOnly }); } catch (e) {
+        if (e instanceof HealSelectionError) return reply.code(400).send({ error: e.message, validIds: e.validIds, unknownIds: e.unknownIds });
+        if (e instanceof UnknownSiteError) return reply.code(404).send({ error: e.message });
+        return reply.code(400).send({ error: (e as Error).message });
+      }
+    }
     const profile = jr.options?.awsProfile;
     // Only meaningful (and only checked) when the job will actually use Bedrock.
     if (profile && (jr.options?.provider ?? opts.config.provider) === 'bedrock' && !listAwsProfiles(opts.awsEnv ?? process.env).includes(profile)) return reply.code(400).send({ error: `Unknown AWS profile "${profile}"` });

@@ -104,7 +104,7 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `journeys <url>` | show stored journeys; `--approve <ids…>`, `--reject <ids…>`, `--approve-all`, `--edit` (opens `$EDITOR`, validated on save) |
 | `generate <url>` | write specs for selected/approved journeys (`--regenerate` to overwrite stored code) |
 | `run <url>` | run stored tests (`--journey <ids…>` for a subset). Exits 1 on any failure |
-| `heal <url>` | run tests, then self-heal failures |
+| `heal <url> [testIds…]` | re-run tests, then self-heal the failing ones. With no selection: every stored test. `testIds…` (positional; `--journey <ids…>` is an alias) heal only those tests — ids as shown by `list-test-cases`; `--failed` selects only tests whose **latest stored run** failed (combined with ids: those of them that failed). Only selected tests are re-run; one that now passes is reported `already passing, not healed` and never reaches the LLM. Unknown ids → error listing the valid ids, exit 1, nothing run. `--failed` with nothing failing → message, exit 0. Prints a per-test summary (`healed` / `app_bug` / `flaky_or_environment` / `failed` / `already passing`); exits 1 if any heal ended `failed` or `app_bug` |
 | `all <url>` | discover → select → generate → run → heal |
 | `models` | list known Claude models for `--provider anthropic\|bedrock` |
 | `aws-profiles` | list AWS profiles from `~/.aws/config` / `~/.aws/credentials` for `--aws-profile` |
@@ -122,6 +122,8 @@ agentic-e2e journeys https://shop.example.com --edit            # tweak steps/na
 agentic-e2e journeys https://shop.example.com --approve search-products checkout
 agentic-e2e generate https://shop.example.com --require-approval
 agentic-e2e heal https://shop.example.com
+agentic-e2e heal https://shop.example.com checkout login   # only these tests
+agentic-e2e heal https://shop.example.com --failed        # only tests whose latest run failed
 ```
 
 ## Configuration
@@ -164,11 +166,11 @@ pnpm build && node bin/agentic-e2e.js serve        # http://localhost:4173
 # or for UI development: pnpm dev:server  (API on :4173)  +  pnpm web:dev  (Vite on :5173, proxies /api)
 ```
 
-Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), and trigger Discover / Generate / Run / Heal / Run all. Progress streams live (SSE). Per site you get tabs for **journeys** (inline edit, approve/reject, save), **code** (current + original/healed versions), **runs** (results, errors, traces, screenshots), **heals** (verdict, reason, attempts, diff; for failed heals the last error and the candidate patch) and **screenshots** (gallery).
+Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), and trigger Discover / Generate / Run / Heal / Run all. Progress streams live (SSE). Per site you get tabs for **journeys** (inline edit, approve/reject, save), **code** (current + original/healed versions), **runs** (results, errors, traces, screenshots), **tests** (every stored test with its latest outcome and a checkbox; **Heal selected** and **Heal all failed** start a heal job for just those tests and refresh the heals tab when done), **heals** (verdict, reason, attempts, diff; for failed heals the last error and the candidate patch) and **screenshots** (gallery).
 
 > ⚠️ The server executes LLM-generated Playwright tests and spends API credits. It binds to `127.0.0.1` and rejects cross-origin mutating requests; do not expose it publicly or add auth-less port forwarding.
 
-REST API (all JSON): `GET /api/config`, `GET /api/aws-profiles`, `GET /api/models`, `GET /api/sites`, `GET /api/sites/:site`, `PUT /api/sites/:site/journeys`, `GET /api/sites/:site/tests/:id`, `GET /api/sites/:site/runs/:runId`, `GET /api/sites/:site/files/(screenshots|runs)/…`, `POST /api/jobs` `{action, url, options?, journeyIds?, rediscover?, regenerate?}`, `GET /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE).
+REST API (all JSON): `GET /api/config`, `GET /api/aws-profiles`, `GET /api/models`, `GET /api/sites`, `GET /api/sites/:site`, `PUT /api/sites/:site/journeys`, `GET /api/sites/:site/test-cases`, `GET /api/sites/:site/tests/:id`, `GET /api/sites/:site/runs/:runId`, `GET /api/sites/:site/files/(screenshots|runs)/…`, `POST /api/jobs` `{action, url, options?, journeyIds?, failedOnly?, rediscover?, regenerate?}` (for `heal`, `journeyIds` / `failedOnly` select the tests to heal; unknown ids → `400 {error, validIds, unknownIds}`, `failedOnly` with nothing failing → a job that finishes with `result.noneFailing: true`), `GET /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE).
 
 ## Data layout
 
