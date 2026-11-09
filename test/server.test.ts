@@ -97,6 +97,52 @@ describe('server', () => {
     expect(heals.find((h: { id: string }) => h.id === 'new')).toMatchObject({ lastError: 'Error: boom', candidateDiff: '+x' });
   });
 
+  describe('SPEC-008 heal selection', () => {
+    const post = (payload: unknown, extra: Record<string, unknown> = {}) => app.inject({ method: 'POST', url: '/api/jobs', payload: payload as never, ...extra });
+    const finish = async (jobId: string) => { await app.inject(`/api/jobs/${jobId}/events`); return (await app.inject(`/api/jobs/${jobId}`)).json(); };
+    let id: string;
+    beforeAll(() => { id = store.listSites()[0].id; });
+
+    it('AC-12: unknown ids -> 400 with valid ids, no job created', async () => {
+      store.saveTest(id, 'browse', 'x');
+      const before = (await app.inject('/api/jobs')).json().length;
+      const r = await post({ action: 'heal', url: fx.url, journeyIds: ['browse', 'zzz'] });
+      expect(r.statusCode).toBe(400);
+      expect(r.json()).toMatchObject({ unknownIds: ['zzz'], validIds: expect.arrayContaining(['browse']) });
+      expect(r.json().error).toMatch(/zzz/);
+      expect((await app.inject('/api/jobs')).json().length).toBe(before);
+    });
+    it('AC-12: failedOnly validation', async () => {
+      expect((await post({ action: 'run', url: fx.url, failedOnly: true })).statusCode).toBe(400);
+      expect((await post({ action: 'heal', url: fx.url, failedOnly: 'yes' })).statusCode).toBe(400);
+      expect((await post({ action: 'heal', url: fx.url, journeyIds: [1] })).statusCode).toBe(400);
+    });
+    it('unknown site with a selection -> 404', async () => {
+      expect((await post({ action: 'heal', url: 'https://nowhere.test', failedOnly: true })).statusCode).toBe(404);
+    });
+    it('AC-13: failedOnly with nothing failing ends done with noneFailing and no LLM calls', async () => {
+      store.saveTest(id, 'browse', 'x');
+      store.saveRun(id, { id: '2099-01-01T00-00-00-000Z', kind: 'run', startedAt: '', finishedAt: '2099-01-01T00:00:00Z', screenshots: 'off', fullPage: false, results: [{ journeyId: 'browse', file: 'browse.spec.ts', status: 'passed', durationMs: 1, screenshots: [] }] });
+      const r = await post({ action: 'heal', url: fx.url, failedOnly: true });
+      expect(r.statusCode).toBe(202);
+      const job = await finish(r.json().jobId);
+      expect(job.status).toBe('done');
+      expect(job.result).toMatchObject({ noneFailing: true, selected: [], heals: [] });
+    });
+    it('AC-14: protections still apply to the new payload', async () => {
+      const payload = { action: 'heal', url: fx.url, failedOnly: true };
+      expect((await post(payload, { headers: { host: 'attacker.com:4173' } })).statusCode).toBe(403);
+      expect((await post(payload, { headers: { origin: 'http://evil.test', host: 'localhost:4173' } })).statusCode).toBe(403);
+      expect((await app.inject({ method: 'POST', url: '/api/jobs', headers: { 'content-type': 'text/plain' }, payload: JSON.stringify(payload) })).statusCode).toBe(415);
+    });
+    it('AC-15: GET /api/sites/:site/test-cases returns the listing; unknown site 404', async () => {
+      const r = await app.inject(`/api/sites/${id}/test-cases`);
+      expect(r.statusCode).toBe(200);
+      expect(r.json().tests.find((t: { journeyId: string }) => t.journeyId === 'browse').lastRun.outcome).toBe('passed');
+      expect((await app.inject('/api/sites/not-a-site/test-cases')).statusCode).toBe(404);
+    });
+  });
+
   it('serves test code and files; AC-34 blocks traversal', async () => {
     const id = store.listSites()[0].id;
     store.saveTest(id, 'browse', 'code here');
