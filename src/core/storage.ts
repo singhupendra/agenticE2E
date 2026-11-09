@@ -45,6 +45,9 @@ export class Store {
   testsDir(site: string) { return path.join(this.siteDir(site), 'tests'); }
   testFile(site: string, id: string) { return path.join(this.testsDir(site), `${this.checkId(id)}.spec.ts`); }
 
+  /** True when a site directory exists in the data dir (never creates it). */
+  hasSite(site: string): boolean { return fs.existsSync(this.siteDir(site)); }
+
   ensureSite(site: string) {
     const tests = this.testsDir(site);
     fs.mkdirSync(tests, { recursive: true });
