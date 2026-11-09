@@ -6,10 +6,10 @@ import type { RunRecord, TestResult, Journey } from '../src/core/types.js';
 
 // The real Playwright runner is replaced; `runBehaviour` decides what each (re-)run reports.
 const runCalls: { ids: string[]; kind?: string }[] = [];
-let runBehaviour: (ids: string[], kind?: string) => Record<string, TestResult['status']>;
+let runBehaviour: (ids: string[], kind?: string) => Partial<Record<string, TestResult['status']>>;
 vi.mock('../src/core/runner.js', () => ({
-  runTests: async (_store: unknown, o: { journeyIds?: string[]; kind?: RunRecord['kind'] }) => {
-    const ids = o.journeyIds ?? [];
+  runTests: async (store: { listTests: (s: string) => string[] }, o: { site: string; journeyIds?: string[]; kind?: RunRecord['kind'] }) => {
+    const ids = o.journeyIds ?? store.listTests(o.site);
     runCalls.push({ ids, kind: o.kind });
     const st = runBehaviour(ids, o.kind);
     const results: TestResult[] = ids.map((id) => ({ journeyId: id, file: `${id}.spec.ts`, status: st[id] ?? 'passed', durationMs: 1, screenshots: [], error: st[id] && st[id] !== 'passed' ? 'locator not found' : undefined }));

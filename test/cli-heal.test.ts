@@ -7,8 +7,8 @@ import type { RunRecord, TestResult, Journey } from '../src/core/types.js';
 const runCalls: string[][] = [];
 let failing: Set<string>;
 vi.mock('../src/core/runner.js', () => ({
-  runTests: async (_s: unknown, o: { journeyIds?: string[]; kind?: RunRecord['kind'] }) => {
-    const ids = o.journeyIds ?? [];
+  runTests: async (store: { listTests: (s: string) => string[] }, o: { site: string; journeyIds?: string[]; kind?: RunRecord['kind'] }) => {
+    const ids = o.journeyIds ?? store.listTests(o.site);
     runCalls.push(ids);
     const results: TestResult[] = ids.map((id) => ({ journeyId: id, file: `${id}.spec.ts`, status: failing.has(id) && o.kind !== 'heal-rerun' ? 'failed' : 'passed', durationMs: 1, error: 'boom', screenshots: [] }));
     return { id: 'r', kind: o.kind ?? 'run', startedAt: '', finishedAt: '', screenshots: 'off', fullPage: false, results } satisfies RunRecord;

@@ -9,7 +9,7 @@ import { loadConfig, type PartialConfig, type Config } from '../core/config.js';
 import { parseJourneys, setStatus } from '../core/journeys.js';
 import { listModels, resolveModelId, PROVIDERS, type ProviderId } from '../core/llm/models.js';
 import { healSummary } from '../core/healer.js';
-import { createContext, discover, generate, heal, run, runAll, type Context } from '../core/pipeline.js';
+import { createContext, discover, generate, healSelected, run, runAll, type Context, type HealTestOutcome } from '../core/pipeline.js';
 import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases, type LastRun } from '../core/test-cases.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
@@ -143,16 +143,26 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (r.results.some((t) => t.status !== 'passed')) setExit(1);
     });
 
-  addCommon(program.command('heal <url>').description('run tests and self-heal the failing ones'))
-    .option('--journey <ids...>', 'only these journey ids')
-    .action(async (url: string, o) => {
+  addCommon(program.command('heal <url> [testIds...]').description('re-run tests and self-heal the failing ones (all, the given test ids, or --failed)'))
+    .option('--journey <ids...>', 'test/journey ids to heal (alias of the positional ids)')
+    .option('--failed', 'only tests whose latest stored run outcome is failed (see list-test-cases)')
+    .action(async (url: string, testIds: string[], o) => {
       normalizeSite(url);
+      const ids = [...new Set<string>([...(testIds ?? []), ...(o.journey ?? [])])];
       const ctx = await ctxFrom(o);
-      const r = await run(ctx, url, { journeyIds: o.journey });
-      printRun(r);
-      const heals = await heal(ctx, url, r);
-      for (const h of heals) console.log(`  ${healSummary(h)}`);
-      if (heals.some((h) => h.outcome !== 'healed' && h.outcome !== 'flaky_or_environment')) setExit(1);
+      const r = await healSelected(ctx, url, { ids, failedOnly: o.failed });
+      if (r.noneFailing) return; // healSelected already reported "No failing tests to heal" via progress
+      if (r.run) printRun(r.run);
+      const label: Record<HealTestOutcome, string> = { healed: 'healed', app_bug: 'app_bug', flaky_or_environment: 'flaky_or_environment', failed: 'failed', already_passing: 'already passing, not healed', skipped: 'skipped, not healed' };
+      console.log('\nHeal summary:');
+      for (const t of r.results) {
+        const h = r.heals.find((x) => x.journeyId === t.journeyId);
+        console.log(`  ${t.journeyId}: ${label[t.outcome]}${h ? ` — ${h.reason}` : ''}`);
+      }
+      for (const h of r.heals) console.log(`  ${healSummary(h)}`);
+      const count = (o: HealTestOutcome) => r.results.filter((t) => t.outcome === o).length;
+      console.log(`${r.results.length} test(s): ${count('healed')} healed, ${count('app_bug')} app_bug, ${count('flaky_or_environment')} flaky_or_environment, ${count('failed')} failed, ${count('already_passing')} already passing`);
+      if (r.heals.some((h) => h.outcome !== 'healed' && h.outcome !== 'flaky_or_environment')) setExit(1);
     });
 
   addCommon(program.command('all <url>').description('discover → select → generate → run → heal'))

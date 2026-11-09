@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ModelInfo } from '../../src/core/llm/models';
 import type { HealRecord, Journey, ProgressEvent } from '../../src/core/types';
-import { api, streamJob, type RunDetail, type Settings, type SiteDetail, type SiteSummary, type TestDetail } from './api';
+import { api, streamJob, type HealJobPayload, type RunDetail, type Settings, type SiteDetail, type SiteSummary, type TestCaseRow, type TestDetail } from './api';
 
-type Tab = 'journeys' | 'code' | 'runs' | 'heals' | 'screenshots';
+type Tab = 'journeys' | 'tests' | 'code' | 'runs' | 'heals' | 'screenshots';
 const ACTIONS = ['discover', 'generate', 'run', 'heal', 'all'] as const;
 
 export function App() {
@@ -26,15 +26,16 @@ export function App() {
   useEffect(() => { api.config().then(setSettings).catch((e) => setError(String(e.message))); refreshSites(); }, [refreshSites]);
   useEffect(() => { if (site) refreshDetail(site); else setDetail(null); }, [site, refreshDetail]);
 
-  const start = async (action: (typeof ACTIONS)[number]) => {
+  const [testsVersion, setTestsVersion] = useState(0);
+  const start = async (action: (typeof ACTIONS)[number], extra: HealJobPayload = {}) => {
     if (!settings) return;
     setError(''); setLog([]); setBusy(true);
     try {
-      const { jobId } = await api.startJob({ action, url, options: settings, rediscover, regenerate });
+      const { jobId } = await api.startJob({ action, url, options: settings, rediscover, regenerate, ...extra });
       stop.current = streamJob(jobId, (e) => setLog((l) => [...l, e]), () => {
         setBusy(false);
         refreshSites().then(() => { try { const id = new URL(url).host.replace(':', '_'); setSite((s) => s ?? id); } catch { /* ignore */ } });
-        if (site) refreshDetail(site);
+        if (site) { refreshDetail(site); setTestsVersion((v) => v + 1); }
       });
     } catch (e) { setError((e as Error).message); setBusy(false); }
   };
@@ -80,9 +81,10 @@ export function App() {
         {detail && site && (
           <section className="card">
             <div className="tabs">
-              {(['journeys', 'code', 'runs', 'heals', 'screenshots'] as Tab[]).map((t) => <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
+              {(['journeys', 'tests', 'code', 'runs', 'heals', 'screenshots'] as Tab[]).map((t) => <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
             </div>
             {tab === 'journeys' && <Journeys site={site} journeys={detail.journeys} onSaved={() => refreshDetail(site)} />}
+            {tab === 'tests' && <Tests site={site} busy={busy || !settings} version={testsVersion} onHeal={(p) => start('heal', p)} />}
             {tab === 'code' && <Code site={site} tests={detail.tests} />}
             {tab === 'runs' && <Runs site={site} detail={detail} />}
             {tab === 'heals' && <Heals heals={detail.heals} />}
@@ -208,6 +210,38 @@ function Journeys({ site, journeys, onSaved }: { site: string; journeys: Journey
         <button onClick={() => save()}>Save edits</button>
         <button onClick={() => save(rows.map((j) => (j.status === 'rejected' ? j : { ...j, status: 'approved' as const })))}>Approve all</button>
         <span className="muted">{msg}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Stored tests with their latest outcome; heal the ticked ones or every latest-failed one. */
+function Tests({ site, busy, version, onHeal }: { site: string; busy: boolean; version: number; onHeal: (p: HealJobPayload) => void }) {
+  const [rows, setRows] = useState<TestCaseRow[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let live = true;
+    api.testCases(site).then((r) => { if (live) { setRows(r.tests); setPicked(new Set()); setErr(''); } }).catch((e) => { if (live) setErr(String(e.message)); });
+    return () => { live = false; };
+  }, [site, version]);
+  if (err) return <p className="error">{err}</p>;
+  if (!rows) return <p className="muted">Loading…</p>;
+  if (!rows.length) return <p className="muted">No generated tests yet — run Generate.</p>;
+  const failed = rows.filter((t) => t.lastRun.outcome === 'failed');
+  const toggle = (id: string) => setPicked((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  return (
+    <div>
+      {rows.map((t) => (
+        <label key={t.journeyId} className={`result test-${t.lastRun.outcome}`}>
+          <input type="checkbox" checked={picked.has(t.journeyId)} onChange={() => toggle(t.journeyId)} aria-label={`select ${t.journeyId}`} />{' '}
+          <b>{t.journeyId}</b> <small>{t.name}</small> <span className="badge">{t.lastRun.outcome.replace('_', ' ')}</span>
+          {t.lastRun.error && <small className="muted"> {t.lastRun.error}</small>}
+        </label>
+      ))}
+      <div className="row">
+        <button disabled={busy || !picked.size} onClick={() => onHeal({ journeyIds: rows.filter((t) => picked.has(t.journeyId)).map((t) => t.journeyId) })}>Heal selected ({picked.size})</button>
+        <button disabled={busy || !failed.length} onClick={() => onHeal({ failedOnly: true })}>Heal all failed ({failed.length})</button>
       </div>
     </div>
   );

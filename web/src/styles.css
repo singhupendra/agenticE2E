@@ -26,3 +26,4 @@ pre.code { white-space:pre; } .log { max-height:260px; } .err { color:var(--bad)
 .thumbs { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; } .thumbs a { display:flex; flex-direction:column; width:180px; color:var(--muted); text-decoration:none; } .thumbs img { width:180px; border:1px solid var(--line); border-radius:4px; }
 .diff .add { color:var(--ok); } .diff .del { color:var(--bad); }
 .spinner { display:inline-block; width:12px; height:12px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; animation:spin 1s linear infinite; } @keyframes spin { to { transform:rotate(360deg); } }
+.result.test-passed, .result.test-healed { border-left:3px solid var(--ok); } .result.test-failed { border-left:3px solid var(--bad); } label.result { display:block; cursor:pointer; }
