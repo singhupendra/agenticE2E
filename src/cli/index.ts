@@ -11,6 +11,7 @@ import { listModels, resolveModelId, PROVIDERS, type ProviderId } from '../core/
 import { healSummary } from '../core/healer.js';
 import { createContext, discover, generate, heal, run, runAll, type Context } from '../core/pipeline.js';
 import { Store, normalizeSite } from '../core/storage.js';
+import { listTestCases, type LastRun } from '../core/test-cases.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
 
 const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
@@ -202,6 +203,24 @@ export function buildProgram(setExit: (code: number) => void): Command {
       console.log(`${s.id}  journeys=${store.loadJourneys(s.id)?.length ?? 0} tests=${store.listTests(s.id).length} runs=${runs.length}${last ? ` last=${last.results.filter((r) => r.status === 'passed').length}/${last.results.length} passed` : ''}`);
     }
   });
+
+  program.command('list-test-cases <url>').description('list the stored generated tests of a site with journey status and latest run outcome')
+    .option('--json', 'machine-readable output')
+    .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
+    .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
+    .action(async (url: string, o) => {
+      const site = normalizeSite(url);
+      const config = await loadConfig({ configFile: o.config, cli: { dataDir: o.dataDir } });
+      const listing = listTestCases(new Store(config.dataDir), site.id);
+      if (!listing) throw new Error(`Unknown site ${site.id} in ${config.dataDir}. Run: agentic-e2e discover ${url}`);
+      if (o.json) return console.log(JSON.stringify(listing, null, 2));
+      if (!listing.tests.length) return console.log(`No generated tests for ${site.id} yet. Run: agentic-e2e generate ${url}`);
+      const lastRun = (r: LastRun) => (r.outcome === 'never_run' ? 'never run' : `${r.outcome} ${r.at ?? ''}`.trim());
+      const rows = [['JOURNEY', 'NAME', 'STATUS', 'LAST RUN', 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, lastRun(t.lastRun), t.specFile])];
+      const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+      console.log(`${site.id}: ${listing.tests.length} test${listing.tests.length === 1 ? '' : 's'}`);
+      for (const r of rows) console.log(r.map((cell, c) => (c === r.length - 1 ? cell : cell.padEnd(widths[c]))).join('  '));
+    });
 
   addCommon(program.command('serve').description('start the web UI + REST API'))
     .option('--port <n>', 'port', num, 4173)

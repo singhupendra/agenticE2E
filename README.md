@@ -57,7 +57,7 @@ export AGENTICQA_BEDROCK_MODEL_ID=global.anthropic.claude-sonnet-5-5   # any Bed
 
 The selected profile is loaded when the app runs and is used even if `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` or `AWS_BEARER_TOKEN_BEDROCK` are set. With no profile selected, the standard AWS credential chain applies as before. In the web UI (`serve`), choose the provider *Amazon Bedrock* in **Settings** and pick the **AWS profile** from the dropdown (it lists the profiles on the machine running the server; only names are shown, never keys).
 
-Credentials are only needed when something actually calls the LLM (new discovery, code generation, healing failures — i.e. `discover`, `generate`, `heal`, `all` and the matching UI jobs). `run`, `journeys`, `list`, `models` and `serve` itself start without them. Provider/model can also be set per command with `--provider`, `--model`, `--aws-region`, `--aws-profile` (see [Configuration](#configuration)).
+Credentials are only needed when something actually calls the LLM (new discovery, code generation, healing failures — i.e. `discover`, `generate`, `heal`, `all` and the matching UI jobs). `run`, `journeys`, `list`, `list-test-cases`, `models` and `serve` itself start without them. Provider/model can also be set per command with `--provider`, `--model`, `--aws-region`, `--aws-profile` (see [Configuration](#configuration)).
 
 ### Build (optional)
 
@@ -109,6 +109,7 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `models` | list known Claude models for `--provider anthropic\|bedrock` |
 | `aws-profiles` | list AWS profiles from `~/.aws/config` / `~/.aws/credentials` for `--aws-profile` |
 | `list` | known sites with journey/test/run counts |
+| `list-test-cases <url>` | the stored generated tests of one site: journey id, name, journey status (as stored), latest run outcome (`passed`/`failed`/`healed`/`skipped`/`never run`, with timestamp) and spec file path. `--json` for machine-readable output (`{site, dataDir, tests[]}`). Exits 1 for an unknown site; exits 0 with a message when the site has no generated tests yet. Read-only, no LLM credentials needed |
 | `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`) |
 
 Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--aws-profile <name>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`. Patterns are case-insensitive substrings, or `/regex/flags`.
