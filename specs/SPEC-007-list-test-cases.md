@@ -46,3 +46,4 @@ and how it last fared, you have to read `data/sites/<host>/` by hand (`tests/*.s
 - **AC-10** Given `--data-dir <dir>` or a `--config` file with `dataDir`, Then that directory is read.
 - **AC-11** Given `ftp://example.com`, Then exit 1 with a message mentioning http.
 - **AC-12** `listTestCases` returns `null` for an unknown site and does not write to the data dir.
+- **AC-13** Given a stray spec file with a non-standard name (e.g. `My Test.spec.ts`), Then it is listed (journey status `unknown`) and the command does not fail.

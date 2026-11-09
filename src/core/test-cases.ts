@@ -58,7 +58,8 @@ export function listTestCases(store: Store, siteId: string): SiteTestCases | nul
     return {
       journeyId,
       name: j?.name ?? journeyId,
-      specFile: path.resolve(store.testFile(siteId, journeyId)),
+      // Not store.testFile(): it rejects stray names like `My Test.spec.ts`.
+      specFile: path.resolve(store.testsDir(siteId), `${journeyId}.spec.ts`),
       journeyStatus: j?.status ?? 'unknown',
       lastRun,
     };

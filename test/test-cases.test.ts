@@ -48,6 +48,14 @@ describe('listTestCases (core)', () => {
     expect(c.lastRun).toEqual({ outcome: 'never_run' });
     expect(o).toMatchObject({ name: 'orphan', journeyStatus: 'unknown', lastRun: { outcome: 'never_run' } });
   });
+  it('AC-13: stray spec files with non-standard names do not break the listing', () => {
+    seedSite();
+    fs.writeFileSync(path.join(store.testsDir('example.com'), 'My Test.spec.ts'), '// x\n');
+    fs.writeFileSync(path.join(store.testsDir('example.com'), 'Foo.spec.ts'), '// x\n');
+    const r = listTestCases(store, 'example.com')!;
+    expect(r.tests.map((t) => t.journeyId)).toEqual(['Foo', 'My Test', 'a', 'b', 'c']);
+    expect(r.tests[1]).toMatchObject({ name: 'My Test', journeyStatus: 'unknown', lastRun: { outcome: 'never_run' } });
+  });
   it('AC-4: timedOut counts as failed, skipped stays skipped', () => {
     seedSite();
     store.saveRun('example.com', runRec('2026-01-03T00-00-00-000Z', '2026-01-03T00:00:05.000Z', [res('b', 'timedOut', 'slow'), res('c', 'skipped')]));
