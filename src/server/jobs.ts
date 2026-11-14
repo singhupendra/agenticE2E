@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { authUserFor } from '../core/auth.js';
 import { configSchema, type Config } from '../core/config.js';
-import { DEFAULT_CREDENTIALS_FILE, loadCredentials } from '../core/credentials.js';
+import { DEFAULT_CREDENTIALS_FILE, loadCredentials, publicError } from '../core/credentials.js';
 import { createContext, discover, generate, healSelected, run, runAll } from '../core/pipeline.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { normalizeSite } from '../core/storage.js';
@@ -99,7 +99,7 @@ export class JobManager {
         this.emit(job, { type: 'done', message: `${req.action} finished`, data: job.result });
       } catch (e) {
         job.status = 'error';
-        job.error = ctx.redact((e as Error).message);
+        job.error = ctx.redact(publicError(e));
         job.finishedAt = new Date().toISOString();
         this.emit(job, { type: 'error', message: job.error });
       }

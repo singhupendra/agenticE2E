@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -132,5 +133,80 @@ describe('cli (AC-21)', () => {
     expect(await cli('list-test-cases', 'https://a.test', '--json')).toBe(0);
     const j = JSON.parse(out.join('\n'));
     expect(j.tests.find((t: { journeyId: string }) => t.journeyId === 'acct')).toMatchObject({ requiresAuth: true, user: 'member' });
+  });
+});
+
+describe('credentials errors never leak paths or env var names through the API (PR #10 review)', () => {
+  const secretVar = 'E2E_TOTALLY_PRIVATE_VAR_NAME';
+  async function appFor(credentialsFile: string) {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-leak-'));
+    const config = resolveConfig({ cli: { dataDir, credentialsFile } });
+    return buildApp({ config, llm: new MockLLM(() => ({})), webDir: path.join(dataDir, 'no-web') });
+  }
+  const brokenFiles = (): Record<string, string> => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-leak-repo-'));
+    execFileSync('git', ['init', '-q'], { cwd: repo });
+    const tracked = writeCreds({ 'a.test': { users: { u: { username: 'uuu', password: 'ppp-ppp' } } } }, { dir: repo });
+    execFileSync('git', ['add', 'credentials.json'], { cwd: repo });
+    return {
+      missing: path.join(os.tmpdir(), 'leak-check-dir-missing', 'credentials.json'),
+      tracked,
+      badJson: writeCreds('{ nope', { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-json-')) }),
+      envVar: writeCreds({ 'a.test': { users: { u: { username: `\${${secretVar}}`, password: 'ppp-ppp' } } } }, { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-env-')) }),
+      badShape: writeCreds({ 'a.test': { users: {} } }, { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-shape-')) }),
+    };
+  };
+  const leaks = (body: string, file: string) => [file, path.dirname(file), secretVar, 'git rm --cached'].filter((x) => body.includes(x));
+
+  it.each(['missing', 'tracked', 'badJson', 'envVar', 'badShape'])('GET /api/auth (%s): generic error, no path / env var name', async (kind) => {
+    const file = brokenFiles()[kind];
+    const app = await appFor(file);
+    const res = await app.inject(`/api/auth?url=${encodeURIComponent('https://a.test')}`);
+    expect(res.json()).toMatchObject({ configured: false, users: [], error: 'credentials file could not be loaded' });
+    expect(leaks(res.body, file)).toEqual([]);
+    await app.close();
+  });
+
+  it.each(['missing', 'tracked', 'badJson', 'envVar', 'badShape'])('POST /api/jobs auth (%s): 400 with a generic message, no path / env var name', async (kind) => {
+    const file = brokenFiles()[kind];
+    const app = await appFor(file);
+    const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: 'https://a.test', options: { auth: true } } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('credentials file could not be loaded');
+    expect(leaks(res.body, file)).toEqual([]);
+    await app.close();
+  });
+
+  it('selection errors stay informative (names only) and path-free', async () => {
+    const file = writeCreds(fixtureCreds('a.test'));
+    const app = await appFor(file);
+    const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: 'https://a.test', options: { auth: true, authUser: 'ghost' } } });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toMatch(/unknown user.*ghost.*member/i);
+    const noSite = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: 'https://other.test', options: { auth: true } } });
+    expect(noSite.statusCode).toBe(400);
+    expect(leaks(res.body + noSite.body, file)).toEqual([]);
+    await app.close();
+  });
+
+  it('the server logs the detail to stderr instead', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const file = brokenFiles().missing;
+    const app = await appFor(file);
+    await app.inject(`/api/auth?url=${encodeURIComponent('https://a.test')}`);
+    expect(spy.mock.calls.flat().join(' ')).toContain(file);
+    spy.mockRestore();
+    await app.close();
+  });
+
+  it('the chmod warning emitted through progress (SSE) does not contain the path', async () => {
+    const { createContext } = await import('../src/core/pipeline.js');
+    const file = writeCreds(fixtureCreds('a.test'), { mode: 0o644 });
+    const events: { message: string }[] = [];
+    createContext({ config: resolveConfig({ cli: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'x-')), credentialsFile: file, auth: true } }), onProgress: (e) => events.push(e) });
+    const warn = events.find((e) => /chmod 600/.test(e.message));
+    expect(warn).toBeDefined();
+    expect(warn!.message).not.toContain(file);
+    expect(warn!.message).not.toContain(path.dirname(file));
   });
 });

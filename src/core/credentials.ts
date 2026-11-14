@@ -8,9 +8,20 @@ import { normalizeSite } from './storage.js';
 export const DEFAULT_CREDENTIALS_FILE = '.agentic-e2e/credentials.json';
 export const AUTH_USER_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
+export const GENERIC_CREDENTIALS_ERROR = 'credentials file could not be loaded';
+
+/**
+ * `message` is for the operator (CLI, server log) and may name the file or an env var. `publicMessage` is the only text
+ * that may reach a web client: generic by default; selection errors (unknown site/user) list names only and pass themselves.
+ */
 export class CredentialsError extends Error {
   readonly statusCode = 400;
-  constructor(message: string) { super(message); this.name = 'CredentialsError'; }
+  constructor(message: string, public readonly publicMessage: string = GENERIC_CREDENTIALS_ERROR) { super(message); this.name = 'CredentialsError'; }
+}
+
+/** What a web client may be told about an error (never a path, env var name or file detail). */
+export function publicError(e: unknown): string {
+  return e instanceof CredentialsError ? e.publicMessage : (e as Error).message;
 }
 
 const loginHintsSchema = z.object({
@@ -70,12 +81,12 @@ export class CredentialStore {
   /** Select a user: explicit name, else defaultUser, else the only user. */
   getUser(site: string, name?: string): ResolvedUser {
     const s = this.site(site);
-    if (!s) throw new CredentialsError(`No credentials for site ${site} in ${this.configured ? this.file : 'the credentials file (none found)'}`);
+    if (!s) { const m = `No credentials for site ${site} in the credentials file${this.configured ? '' : ' (none found)'}`; throw new CredentialsError(m, m); }
     const names = Object.keys(s.users);
     const pick = name ?? s.defaultUser ?? (names.length === 1 ? names[0] : undefined);
-    if (!pick) throw new CredentialsError(`Site ${site} has several users (${names.join(', ')}); choose one with --user <name> or set "defaultUser"`);
+    if (!pick) { const m = `Site ${site} has several users (${names.join(', ')}); choose one with --user <name> or set "defaultUser"`; throw new CredentialsError(m, m); }
     const u = s.users[pick];
-    if (!u) throw new CredentialsError(`Unknown user "${pick}" for site ${site}. Known users: ${names.join(', ')}`);
+    if (!u) { const m = `Unknown user "${pick}" for site ${site}. Known users: ${names.join(', ')}`; throw new CredentialsError(m, m); }
     const { username, password, ...fields } = u;
     return { name: pick, username, password, fields };
   }
@@ -115,7 +126,7 @@ export function loadCredentials(opts: LoadOptions): CredentialStore {
     throw new CredentialsError(`Refusing to use ${file}: it is tracked by git, so its secrets are (or were) in version control. Run \`git rm --cached ${path.basename(file)}\`, add it to .gitignore, and rotate the credentials it contains.`);
   }
   if (process.platform !== 'win32' && (fs.statSync(file).mode & 0o077) !== 0) {
-    opts.onWarn?.(`${file} is readable by other users; run: chmod 600 ${JSON.stringify(file)}`);
+    opts.onWarn?.(`The credentials file is readable by other users; run chmod 600 on it (${path.basename(file)})`);
   }
   let raw: unknown;
   try {

@@ -90,7 +90,7 @@ async function findLoginPage(page: Page, origin: string, hints: LoginHints, time
     await page.goto(c, { waitUntil: 'load', timeout: timeoutMs }).catch(() => {});
     if (await passwordVisible(page)) return c;
   }
-  throw new CredentialsError(`Could not find a login form for ${origin}. Set "login.loginUrl" for this site in the credentials file.`);
+  { const m = `Could not find a login form for ${origin}. Set "login.loginUrl" for this site in the credentials file.`; throw new CredentialsError(m, m); }
 }
 
 interface Selectors { usernameSelector: string; passwordSelector: string; submitSelector: string }
