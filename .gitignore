@@ -4,3 +4,11 @@ web/dist
 data
 .DS_Store
 *.log
+
+# SPEC-009: credentials and sessions must never be committed
+.agentic-e2e/
+credentials*.json
+!credentials.example.json
+*.credentials.json
+.auth/
+**/storageState*.json

@@ -4,6 +4,7 @@ import { createTwoFilesPatch } from 'diff';
 import type { LLMProvider } from './llm/types.js';
 import { healSchema } from './llm/schemas.js';
 import { stripFences } from './codegen.js';
+import type { Redactor } from './redact.js';
 import type { Store } from './storage.js';
 import type { HealAttempt, HealRecord, ProgressFn, RunRecord, TestResult } from './types.js';
 import { validateSpec, weakensAssertions } from './validate.js';
@@ -14,6 +15,8 @@ First classify the failure (verdict):
 - "test_breakage": the app still offers the functionality the journey needs, but the test is wrong or stale (renamed label/button/text, changed role, different URL, wrong locator, missing wait/step, wrong test data). Provide a patched test.
 - "app_bug": the app is genuinely broken or no longer delivers the behaviour the journey's assertions describe (error page, 500, missing feature, wrong result, confirmation never appears although all inputs were valid). Do NOT patch; explain what is broken.
 - "flaky_or_environment": timing, network or environment issue; the test logic looks right. Do NOT patch.
+
+Credentials: specs may read the test user's credentials only through the "credentials" fixture (credentials.username / credentials.password) and pages may already be logged in via a stored session. NEVER write credential values as literals; the real values are shown only as {{username}} / {{password}} placeholders.
 
 Rules for patches (verdict test_breakage only):
 - Return the COMPLETE corrected spec in "code". Keep the import from './_support', the step() structure, and the test name.
@@ -40,6 +43,8 @@ export interface HealOptions {
   attempts: number;
   runner: RunnerFn;
   onProgress?: ProgressFn;
+  /** SPEC-009: patches containing a credential value are rejected */
+  redactor?: Redactor;
 }
 
 function readImage(store: Store, site: string, rel?: string) {
@@ -114,7 +119,7 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
       if (patched === current) { reject('patch is identical to the current code'); continue; }
       const weak = weakensAssertions(original, patched);
       if (weak) { reject(weak); continue; }
-      const v = await validateSpec(patched);
+      const v = await validateSpec(patched, { redactor: opts.redactor });
       if (!v.ok) { reject(`patch failed validation: ${v.errors.join('; ')}`); continue; }
 
       store.saveTest(site, journeyId, patched);

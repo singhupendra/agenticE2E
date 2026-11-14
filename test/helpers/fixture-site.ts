@@ -65,7 +65,7 @@ export async function startFixtureSite(): Promise<Fixture> {
       case '/account':
         return protectedPage('My account', `<h1>Welcome back, Test Member</h1><p>Signed in as ${FIXTURE_USER}</p><a href="/account/settings">Settings</a> <a href="/account/delete">Delete account</a> <a href="/logout">Log out</a>`);
       case '/account/settings':
-        return protectedPage('Settings', '<h1>Settings</h1><form method="post" action="/account/confirm" aria-label="Confirm password"><label for="cp">Confirm password</label><input id="cp" name="password" type="password"><button type="submit">Confirm</button></form>');
+        return protectedPage('Settings', '<h1>Settings</h1><form method="post" action="/account/confirm"><label for="cp">Confirm password</label><input id="cp" name="password" type="password"><button type="submit">Confirm</button></form>');
       case '/account/delete':
         return protectedPage('Delete account', '<h1>Account deleted</h1>');
       case '/logout':

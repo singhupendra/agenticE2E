@@ -20,6 +20,9 @@ export interface TestCase {
   specFile: string;
   journeyStatus: JourneyStatus | 'unknown';
   lastRun: LastRun;
+  /** SPEC-009 */
+  requiresAuth?: boolean;
+  user?: string;
 }
 
 export interface SiteTestCases {
@@ -62,6 +65,7 @@ export function listTestCases(store: Store, siteId: string): SiteTestCases | nul
       specFile: path.resolve(store.testsDir(siteId), `${journeyId}.spec.ts`),
       journeyStatus: j?.status ?? 'unknown',
       lastRun,
+      ...(j?.requiresAuth ? { requiresAuth: true, ...(j.user ? { user: j.user } : {}) } : {}),
     };
   });
 

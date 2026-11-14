@@ -78,9 +78,10 @@ function build(opts: { auth: boolean; leakFirst?: boolean }) {
 }
 
 describe('authenticated journeys end to end (fixture site, mocked LLM, real Playwright) — AC-18', () => {
-  const b = build({ auth: true, leakFirst: true });
-  const store = new Store(b.dataDir);
+  let b: ReturnType<typeof build>;
+  let store: Store;
   let site = '';
+  beforeAll(() => { b = build({ auth: true, leakFirst: true }); store = new Store(b.dataDir); });
 
   it('discover (auth) → generate → run: authenticated journeys pass via storageState and the credentials fixture', async () => {
     site = normalizeSite(fx.url).id;

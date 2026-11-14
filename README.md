@@ -106,13 +106,14 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `run <url>` | run stored tests (`--journey <ids…>` for a subset). Exits 1 on any failure |
 | `heal <url> [testIds…]` | re-run tests, then self-heal the failing ones. With no selection: every stored test. `testIds…` (positional; `--journey <ids…>` is an alias) heal only those tests — ids as shown by `list-test-cases`; `--failed` selects only tests whose **latest stored run** failed (combined with ids: those of them that failed). Only selected tests are re-run; one that now passes is reported `already passing, not healed` and never reaches the LLM. Unknown ids → error listing the valid ids, exit 1, nothing run. `--failed` with nothing failing → message, exit 0. Prints a per-test summary (`healed` / `app_bug` / `flaky_or_environment` / `failed` / `already passing`); exits 1 if any heal ended `failed` or `app_bug` |
 | `all <url>` | discover → select → generate → run → heal |
+| `auth-check <url>` | log in with the credentials file and refresh the stored session for a site (`--user`, `--credentials`). Always performs a fresh login; prints success and where the session was saved, never a credential. See [Logged-in testing](#logged-in-testing) |
 | `models` | list known Claude models for `--provider anthropic\|bedrock` |
 | `aws-profiles` | list AWS profiles from `~/.aws/config` / `~/.aws/credentials` for `--aws-profile` |
 | `list` | known sites with journey/test/run counts |
-| `list-test-cases <url>` | the stored generated tests of one site: journey id, name, journey status (as stored), latest run outcome (`passed`/`failed`/`healed`/`skipped`/`never run`, with timestamp) and spec file path. `--json` for machine-readable output (`{site, dataDir, tests[]}`). Exits 1 for an unknown site; exits 0 with a message when the site has no generated tests yet. Read-only, no LLM credentials needed |
+| `list-test-cases <url>` | the stored generated tests of one site: journey id, name, journey status (as stored), latest run outcome (`passed`/`failed`/`healed`/`skipped`/`never run`, with timestamp) and spec file path, and an `AUTH` column (the user a logged-in journey runs as, `-` otherwise). `--json` for machine-readable output (`{site, dataDir, tests[]}`; tests carry `requiresAuth`/`user`). Exits 1 for an unknown site; exits 0 with a message when the site has no generated tests yet. Read-only, no LLM credentials needed |
 | `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`) |
 
-Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--aws-profile <name>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`. Patterns are case-insensitive substrings, or `/regex/flags`.
+Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--aws-profile <name>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`, and for logged-in testing `--auth`, `--user <name>`, `--credentials <file>`. Patterns are case-insensitive substrings, or `/regex/flags`.
 
 Typical review-before-codegen workflow:
 
@@ -158,6 +159,55 @@ export default {
 | `codegenRetries` | `2` | retries with compiler feedback |
 | `requireApproval` | `false` | only generate journeys with status `approved` |
 | `testTimeoutMs` | `30000` | per-test timeout (action/expect timeouts are a third of it) |
+| `credentialsFile` | `.agentic-e2e/credentials.json` | logged-in testing; env `AGENTIC_E2E_CREDENTIALS`, flag `--credentials` (flag > env > config file > default). Never exposed by the API |
+| `auth` / `authUser` | `false` / – | logged-in mode and which named user to use; flags `--auth` / `--user` |
+
+## Logged-in testing
+
+Discovery, planning, generation, running and healing can work as a **logged-in user** (SPEC-009). Credentials come from a **local file that is never committed** and never reach the LLM, generated code, stored data, logs or API responses.
+
+```bash
+mkdir -p .agentic-e2e && cp credentials.example.json .agentic-e2e/credentials.json && chmod 600 .agentic-e2e/credentials.json
+$EDITOR .agentic-e2e/credentials.json                 # real values go here (this path is gitignored)
+agentic-e2e auth-check https://shop.example.com        # does the login work? saves the session
+agentic-e2e all https://shop.example.com --auth --rediscover [--user admin]
+```
+
+**Credentials file** — default `.agentic-e2e/credentials.json` (or `--credentials`, config `credentialsFile`, env `AGENTIC_E2E_CREDENTIALS`). A JSON object keyed by site (host, `host:port` or URL; normalised like the data dir), each with one or more named users and optional login hints; see [`credentials.example.json`](credentials.example.json) (fake values only):
+
+```json
+{
+  "shop.example.com": {
+    "defaultUser": "member",
+    "users": {
+      "member": { "username": "demo.member@example.com", "password": "…" },
+      "admin":  { "username": "${SHOP_ADMIN_USER}", "password": "${SHOP_ADMIN_PASSWORD}" }
+    },
+    "login": { "loginUrl": "/login", "usernameSelector": "input[name=email]", "passwordSelector": "input[name=password]",
+               "submitSelector": "button[type=submit]", "successUrl": "/account", "successText": "Welcome back", "checkUrl": "/account" }
+  }
+}
+```
+
+- Any string may use `${ENV_VAR}`; the value is read from the environment when the file is loaded (an unset variable is an error naming the variable). Extra string fields next to `username`/`password` (an OTP seed, a PIN…) are allowed and treated as secrets too.
+- **Login hints are optional.** Without selectors an LLM locates the form — it sees the page and the placeholders `{{username}}`/`{{password}}`, never the real values, which Playwright types locally. `successUrl` (substring or `/regex/`) / `successText` define "logged in"; without them the check is "no password field visible and not still on the login URL". `checkUrl` (a protected page) lets a stored session be validated live.
+- User selection: `--user`, else `defaultUser`, else the only user. Unknown site/user → error listing names only.
+
+**Sessions.** A successful login saves Playwright `storageState` to `data/sites/<host>/auth/<user>.json` (`0600`, gitignored, never served by the API) and reuses it for up to 12 h while its cookies are unexpired and the `checkUrl`/`successText` check passes; otherwise it logs in again. If an authenticated test fails with a reused session that turns out dead, the session is refreshed and the tests re-run once.
+
+**What happens in `--auth` mode.** Discovery crawls as the user (it never follows logout / delete / remove / cancel-subscription / deactivate / unsubscribe links and never clicks anything). The planner may flag journeys `requiresAuth: true` + `user`; they are shown with an `auth` badge in the UI and in `list-test-cases`. Their specs run pre-authenticated (a Playwright `authenticated` project with the storageState; tracing is off for such runs because traces embed cookies) and can read the credentials through the `credentials` fixture (`async ({ page, step, credentials }) => … credentials.password`), backed by `E2E_USERNAME`/`E2E_PASSWORD` that the runner injects into the test process — only for the selected user and only when the run contains authenticated tests. Without `--auth`, authenticated journeys are not generated and are skipped on `run` with a warning. A run uses one user; run again with `--user other` for another role.
+
+### Secret handling
+
+| Guarantee | How |
+|---|---|
+| never committed | `.gitignore` covers `.agentic-e2e/`, `credentials*.json` (except `credentials.example.json`), `*.credentials.json`, `.auth/`, `**/storageState*.json` and `data/`; a test runs `git check-ignore` on them. A credentials file **tracked by git is refused** (`git rm --cached` it and rotate the secrets); a file readable by group/other triggers a `chmod 600` warning |
+| never sent to the LLM | prompts are built from placeholders; every request also passes a redactor (plain, URL-encoded, JSON/HTML-escaped forms → `{{password}}`…). Screenshots are not sent to the LLM in `--auth` mode |
+| never in generated code | specs cannot touch `process`; credentials come via the `credentials` fixture. Codegen and the healer **reject** a spec containing a real value and regenerate (the retry prompt has it redacted) |
+| never in stored data / logs / API | the store redacts `journeys.json`, specs and their versions, pages, run and heal records; the runner redacts `output.log`, `report.json`, failure snapshots and errors; progress events (CLI and SSE) and job results/errors are redacted. `GET /api/auth?url=` returns only `{configured, users: [names]}`; `/api/config` omits the credentials path; job options cannot set it |
+| minimal exposure at run time | the test subprocess env is an allowlist; only the selected user's `E2E_USERNAME`/`E2E_PASSWORD` are added, and only for authenticated runs |
+
+Limits: storageState files contain live session cookies (protect `data/` like the credentials file); a page that echoes a password into the DOM is caught by redaction in artifacts, not prevented; values shorter than 3 characters are not redacted; no 2FA/CAPTCHA/SSO flows, no sign-up; one user per run.
 
 ## Web UI
 
@@ -166,17 +216,18 @@ pnpm build && node bin/agentic-e2e.js serve        # http://localhost:4173
 # or for UI development: pnpm dev:server  (API on :4173)  +  pnpm web:dev  (Vite on :5173, proxies /api)
 ```
 
-Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), and trigger Discover / Generate / Run / Heal / Run all. Progress streams live (SSE). Per site you get tabs for **journeys** (inline edit, approve/reject, save), **code** (current + original/healed versions), **runs** (results, errors, traces, screenshots), **tests** (every stored test with its latest outcome and a checkbox; **Heal selected** and **Heal all failed** start a heal job for just those tests and refresh the heals tab when done), **heals** (verdict, reason, attempts, diff; for failed heals the last error and the candidate patch) and **screenshots** (gallery).
+With **Logged-in testing** ticked (enabled only when the credentials file has the URL's site) and a user picked (names only), every action runs as that user. Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), and trigger Discover / Generate / Run / Heal / Run all. Progress streams live (SSE). Per site you get tabs for **journeys** (inline edit, approve/reject, save), **code** (current + original/healed versions), **runs** (results, errors, traces, screenshots), **tests** (every stored test with its latest outcome and a checkbox; **Heal selected** and **Heal all failed** start a heal job for just those tests and refresh the heals tab when done), **heals** (verdict, reason, attempts, diff; for failed heals the last error and the candidate patch) and **screenshots** (gallery).
 
 > ⚠️ The server executes LLM-generated Playwright tests and spends API credits. It binds to `127.0.0.1` and rejects cross-origin mutating requests; do not expose it publicly or add auth-less port forwarding.
 
-REST API (all JSON): `GET /api/config`, `GET /api/aws-profiles`, `GET /api/models`, `GET /api/sites`, `GET /api/sites/:site`, `PUT /api/sites/:site/journeys`, `GET /api/sites/:site/test-cases`, `GET /api/sites/:site/tests/:id`, `GET /api/sites/:site/runs/:runId`, `GET /api/sites/:site/files/(screenshots|runs)/…`, `POST /api/jobs` `{action, url, options?, journeyIds?, failedOnly?, rediscover?, regenerate?}` (for `heal`, `journeyIds` / `failedOnly` select the tests to heal; unknown ids → `400 {error, validIds, unknownIds}`, `failedOnly` with nothing failing → a job that finishes with `result.noneFailing: true`), `GET /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE).
+REST API (all JSON): `GET /api/config`, `GET /api/aws-profiles`, `GET /api/auth?url=` (`{configured, users[]}`: names only), `GET /api/models`, `GET /api/sites`, `GET /api/sites/:site`, `PUT /api/sites/:site/journeys`, `GET /api/sites/:site/test-cases`, `GET /api/sites/:site/tests/:id`, `GET /api/sites/:site/runs/:runId`, `GET /api/sites/:site/files/(screenshots|runs)/…`, `POST /api/jobs` `{action, url, options?, journeyIds?, failedOnly?, rediscover?, regenerate?}` (for `heal`, `journeyIds` / `failedOnly` select the tests to heal; unknown ids → `400 {error, validIds, unknownIds}`, `failedOnly` with nothing failing → a job that finishes with `result.noneFailing: true`), `GET /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE).
 
 ## Data layout
 
 ```
 data/sites/<host[_port]>/
   site.json  journeys.json  pages.json  heals.json
+  auth/<user>.json                  # Playwright storageState of a logged-in user (0600; session cookies; never served)
   tests/<journey-id>.spec.ts        # plain Playwright Test; imports ./_support
   tests/_support.ts                 # step() fixture, screenshots, failure snapshots (managed by the tool)
   tests/.versions/<id>/{original,healed-N}.spec.ts
@@ -187,10 +238,10 @@ data/sites/<host[_port]>/
 ## Architecture
 
 ```
-src/core    config · llm/{types,anthropic,mock,schemas} · storage · discovery · planner · journeys
+src/core    config · credentials · redact · auth · safety · llm/{types,anthropic,mock,schemas,redacting} · storage · discovery · planner · journeys
             · validate · codegen · runner · healer · pipeline
 src/cli     commander front-end                 src/server  Fastify REST + SSE (+ serves web/dist)
-web/        Vite + React UI                     specs/      SPEC-001…003
+web/        Vite + React UI                     specs/      SPEC-001…009
 ```
 
 - **LLM layer**: `LLMProvider.structured({name, schema, prompt, images})`. The Anthropic provider forces a tool call whose `input_schema` is the zod schema's JSON Schema and re-validates the result. Implement the interface to plug in another provider; `MockLLM` is used by all tests.
@@ -211,7 +262,7 @@ Tests: unit tests per core module with a mocked LLM, plus an integration test th
 
 ## Known limitations
 
-- Chromium only. No authenticated crawling or credential handling; journeys needing real accounts/payments will usually be proposed as "stubbed" or fail.
+- Chromium only. Logged-in testing (see above) covers username/password logins with one user per run; no 2FA/CAPTCHA/SSO/sign-up. Without `--auth`, journeys needing accounts/payments are avoided or fail.
 - App-bug vs test-breakage classification is the LLM's judgement (guided by the snapshot); review heal logs.
 - Discovery models are capped (elements/ARIA text are truncated) to bound prompt size; very large SPAs may need higher `maxPages` / manual journey edits.
 - The web UI has no auth and a single in-memory job store (jobs are lost on restart; one job per site at a time).

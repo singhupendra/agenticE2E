@@ -1,11 +1,15 @@
 import path from 'node:path';
+import { authUserFor, ensureSession, isSessionValid } from './auth.js';
 import { generateTests, type GenerateResult } from './codegen.js';
 import type { Config } from './config.js';
 import { crawl } from './discovery.js';
 import { resolveHealSelection, type HealSelectionRequest } from './heal-selection.js';
 import { healTest } from './healer.js';
+import { CredentialStore, DEFAULT_CREDENTIALS_FILE, loadCredentials, type ResolvedUser } from './credentials.js';
 import { createLLMProvider } from './llm/index.js';
+import { RedactingLLM } from './llm/redacting.js';
 import type { LLMProvider } from './llm/types.js';
+import { Redactor } from './redact.js';
 import { proposeJourneys, selectJourneys } from './planner.js';
 import { runTests } from './runner.js';
 import { Store, normalizeSite } from './storage.js';
@@ -16,17 +20,44 @@ export interface Context {
   store: Store;
   onProgress: ProgressFn;
   getLLM: () => LLMProvider;
+  /** SPEC-009: loaded only in auth mode (empty otherwise) */
+  credentials: CredentialStore;
+  /** knows every credential value of the loaded file; everything persisted/streamed/prompted passes through it */
+  redactor: Redactor;
+  redact: (s: string) => string;
 }
 
-export function createContext(opts: { config: Config; llm?: LLMProvider; onProgress?: ProgressFn }): Context {
-  let llm = opts.llm;
+export function createContext(opts: { config: Config; llm?: LLMProvider; onProgress?: ProgressFn; cwd?: string }): Context {
+  const raw: ProgressFn = opts.onProgress ?? (() => {});
+  const { config } = opts;
+  const credentials = config.auth
+    ? loadCredentials({
+      file: config.credentialsFile ?? path.resolve(opts.cwd ?? process.cwd(), DEFAULT_CREDENTIALS_FILE),
+      explicit: !!config.credentialsFile,
+      onWarn: (message) => raw({ type: 'warn', stage: 'auth', message }),
+    })
+    : CredentialStore.empty();
+  const redactor = new Redactor(credentials.secretEntries());
+  let llm: LLMProvider | undefined;
   return {
-    config: opts.config,
-    store: new Store(opts.config.dataDir),
-    onProgress: opts.onProgress ?? (() => {}),
-    getLLM: () => (llm ??= createLLMProvider(opts.config)),
+    config,
+    store: new Store(config.dataDir, redactor),
+    onProgress: (e) => raw(redactor.size ? redactor.redactDeep(e) : e),
+    getLLM: () => {
+      if (!llm) {
+        const inner = opts.llm ?? createLLMProvider(config);
+        llm = config.auth ? new RedactingLLM(inner, redactor, { dropImages: true }) : inner;
+      }
+      return llm;
+    },
+    credentials,
+    redactor,
+    redact: (s) => redactor.redact(s),
   };
 }
+
+/** The user this run is logged in as (`null` = anonymous). Throws before anything expensive when the user is unknown. */
+const authUser = (ctx: Context, url: string): ResolvedUser | null => authUserFor(ctx, url);
 
 const stage = (ctx: Context, s: string, message: string) => ctx.onProgress({ type: 'stage', stage: s, message });
 
@@ -36,24 +67,28 @@ export interface DiscoverResult { site: string; journeys: Journey[]; pages: Page
 export async function discover(ctx: Context, url: string, opts: { rediscover?: boolean } = {}): Promise<DiscoverResult> {
   const meta = normalizeSite(url);
   const { store, config } = ctx;
+  const user = authUser(ctx, url);
   const stored = store.loadJourneys(meta.id);
   if (stored && !opts.rediscover) {
+    if (user && !stored.some((j) => j.requiresAuth)) ctx.onProgress({ type: 'info', stage: 'discover', message: `Stored journeys for ${meta.id} include no logged-in journeys; use rediscover to crawl as "${user.name}"` });
     ctx.onProgress({ type: 'info', stage: 'discover', message: `Using ${stored.length} stored journeys for ${meta.id} (use rediscover to refresh)` });
     return { site: meta.id, journeys: stored, pages: store.loadPages(meta.id), reused: true };
   }
   stage(ctx, 'discover', `Crawling ${meta.url || meta.origin} (max ${config.maxPages} pages, depth ${config.maxDepth})`);
   store.saveSite({ id: meta.id, origin: meta.origin, url: meta.url || meta.origin });
   const siteDir = store.siteDir(meta.id);
+  const session = user ? await ensureSession(ctx, url, { user: user.name }) : undefined;
   const pages = await crawl(meta.url || meta.origin, {
     maxPages: config.maxPages, maxDepth: config.maxDepth, timeoutMs: config.timeoutMs, headless: config.headless,
     screenshotDir: config.screenshots === 'off' ? undefined : path.join(siteDir, 'screenshots', 'discovery'),
     fullPage: config.fullPage,
+    storageState: session?.storageState,
     onPage: (p) => ctx.onProgress({ type: 'info', stage: 'discover', message: `Captured ${p.path} — ${p.title}` }),
   });
   for (const p of pages) if (p.screenshot) p.screenshot = path.relative(siteDir, p.screenshot);
   store.savePages(meta.id, pages);
   stage(ctx, 'plan', `Asking the LLM to propose journeys from ${pages.length} pages`);
-  const proposed = await proposeJourneys(ctx.getLLM(), pages);
+  const proposed = await proposeJourneys(ctx.getLLM(), pages, user ? { auth: { user: user.name, userNames: ctx.credentials.userNames(meta.id) } } : {});
   ctx.onProgress({ type: 'info', stage: 'plan', message: `Proposed ${proposed.length} journeys; selecting up to ${config.maxJourneys}` });
   const journeys = await selectJourneys(ctx.getLLM(), proposed, { maxJourneys: config.maxJourneys, include: config.include, exclude: config.exclude });
   store.saveJourneys(meta.id, journeys);
@@ -75,8 +110,12 @@ export async function reselect(ctx: Context, url: string): Promise<Journey[]> {
 export async function generate(ctx: Context, url: string, opts: { regenerate?: boolean; rediscover?: boolean } = {}): Promise<{ site: string; journeys: Journey[]; result: GenerateResult; reusedJourneys: boolean }> {
   const d = await discover(ctx, url, { rediscover: opts.rediscover });
   const meta = normalizeSite(url);
+  const user = authUser(ctx, url);
+  const anonymous = d.journeys.filter((j) => !j.requiresAuth);
+  if (!user && anonymous.length < d.journeys.length) ctx.onProgress({ type: 'info', stage: 'generate', message: `Skipping ${d.journeys.length - anonymous.length} journey(ies) that require a logged-in user (enable logged-in mode with --auth)` });
   stage(ctx, 'generate', 'Generating Playwright tests');
-  const result = await generateTests(ctx.store, ctx.getLLM(), d.journeys, {
+  const result = await generateTests(ctx.store, ctx.getLLM(), user ? d.journeys : anonymous, {
+    redactor: ctx.redactor, authUser: user?.name,
     site: d.site, baseUrl: meta.origin, pages: d.pages ?? [], retries: ctx.config.codegenRetries,
     requireApproval: ctx.config.requireApproval, regenerate: opts.regenerate, onProgress: ctx.onProgress,
   });
@@ -85,11 +124,39 @@ export async function generate(ctx: Context, url: string, opts: { regenerate?: b
 
 export async function run(ctx: Context, url: string, opts: { journeyIds?: string[]; kind?: RunRecord['kind'] } = {}): Promise<RunRecord> {
   const meta = normalizeSite(url);
-  stage(ctx, 'run', 'Running tests');
-  return runTests(ctx.store, {
-    site: meta.id, baseUrl: meta.origin, journeyIds: opts.journeyIds, screenshots: ctx.config.screenshots, fullPage: ctx.config.fullPage,
-    headless: ctx.config.headless, testTimeoutMs: ctx.config.testTimeoutMs, kind: opts.kind, onProgress: ctx.onProgress,
-  });
+  const user = authUser(ctx, url);
+  const { store } = ctx;
+  let ids = opts.journeyIds ?? store.listTests(meta.id);
+  const journeys = new Map((store.loadJourneys(meta.id) ?? []).map((j) => [j.id, j]));
+  const needsAuth = (id: string) => !!journeys.get(id)?.requiresAuth;
+  if (!user) {
+    for (const id of ids.filter(needsAuth)) ctx.onProgress({ type: 'warn', stage: 'run', message: `Skipping "${id}": it requires a logged-in user (enable logged-in mode with --auth)` });
+    const before = ids.length;
+    ids = ids.filter((id) => !needsAuth(id));
+    if (before && !ids.length) throw new Error(`No runnable tests for site ${meta.id}: the stored tests all require a logged-in user. Pass --auth.`);
+  } else {
+    for (const id of ids.filter((x) => needsAuth(x) && journeys.get(x)!.user && journeys.get(x)!.user !== user.name)) ctx.onProgress({ type: 'info', stage: 'run', message: `Skipping "${id}": it belongs to user "${journeys.get(id)!.user}" (this run is "${user.name}"; run again with --user)` });
+    ids = ids.filter((id) => !(needsAuth(id) && journeys.get(id)!.user && journeys.get(id)!.user !== user.name));
+  }
+  const authIds = user ? ids.filter(needsAuth) : [];
+  const exec = async (storageState?: string) => {
+    stage(ctx, 'run', 'Running tests');
+    return runTests(store, {
+      site: meta.id, baseUrl: meta.origin, journeyIds: ids, screenshots: ctx.config.screenshots, fullPage: ctx.config.fullPage,
+      headless: ctx.config.headless, testTimeoutMs: ctx.config.testTimeoutMs, kind: opts.kind, onProgress: ctx.onProgress,
+      ...(user && storageState ? { auth: { storageState, journeyIds: authIds, env: { E2E_USERNAME: user.username, E2E_PASSWORD: user.password } } } : {}),
+    });
+  };
+  if (!user || !authIds.length) return exec();
+  const session = await ensureSession(ctx, url, { user: user.name });
+  const first = await exec(session.storageState);
+  const failedAuth = first.results.some((r) => authIds.includes(r.journeyId) && r.status !== 'passed');
+  if (session.reused && failedAuth && !(await isSessionValid(ctx, url, user.name))) {
+    ctx.onProgress({ type: 'info', stage: 'auth', message: 'Stored session expired during the run; logging in again and re-running once' });
+    const fresh = await ensureSession(ctx, url, { user: user.name, force: true });
+    return exec(fresh.storageState);
+  }
+  return first;
 }
 
 export async function heal(ctx: Context, url: string, failedRun: RunRecord): Promise<HealRecord[]> {
@@ -101,7 +168,7 @@ export async function heal(ctx: Context, url: string, failedRun: RunRecord): Pro
   for (const f of failures) {
     records.push(await healTest(ctx.store, ctx.getLLM(), {
       site: meta.id, baseUrl: meta.origin, journeyId: f.journeyId, failure: f, attempts: ctx.config.healAttempts,
-      runner: (ids) => run(ctx, url, { journeyIds: ids, kind: 'heal-rerun' }), onProgress: ctx.onProgress,
+      runner: (ids) => run(ctx, url, { journeyIds: ids, kind: 'heal-rerun' }), onProgress: ctx.onProgress, redactor: ctx.redactor,
     }));
   }
   return records;
@@ -142,6 +209,7 @@ export interface HealSelectedResult {
 /** Select (and validate) tests, re-run only those, and heal only the ones that still fail. Passing ones never reach the LLM. */
 export async function healSelected(ctx: Context, url: string, selection: HealSelectionRequest = {}): Promise<HealSelectedResult> {
   const meta = normalizeSite(url);
+  authUser(ctx, url);
   const sel = resolveHealSelection(ctx.store, meta.id, selection);
   if (sel.ids && !sel.ids.length) {
     ctx.onProgress({ type: 'info', stage: 'heal', message: `No failing tests to heal for ${meta.id}` });

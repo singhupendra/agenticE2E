@@ -60,14 +60,14 @@ credential into git, into an LLM prompt, into generated code, or into any stored
 | FR-21 | Every credential value (all fields of all users of all sites in the loaded file) is registered with a `Redactor`. `redact()` replaces an occurrence with its placeholder (`{{username}}`, `{{password}}`, `{{<field>}}`), also in URL-encoded and JSON-escaped form. Values shorter than 3 chars are ignored. |
 | FR-22 | LLM requests (system, prompt) go through the redactor; images are not sent to the LLM while auth mode is on (screenshots can show account data). Discovery, planner, codegen, healer and login prompts therefore only ever contain placeholders. |
 | FR-23 | The store redacts everything it persists: `journeys.json`, test sources and versions, `pages.json`, run records, heal records. The runner redacts `output.log`, `report.json`, failure snapshots and result errors. Progress events (CLI log and SSE) and job results/errors are redacted. |
-| FR-24 | Password fields are masked in screenshots (browser behaviour; asserted on the fixture). storageState files are never served by the file route. |
+| FR-24 | Password fields are masked in screenshots (`type=password` inputs render as dots in Chromium screenshots — browser behaviour, not separately tested; and screenshots are not sent to the LLM in auth mode, FR-22). storageState files are never served by the file route. |
 | FR-25 | `GET /api/auth?url=<url>` returns only `{ configured, users: [names], error? }`. `GET /api/config` never includes `credentialsFile`. Job options accept `auth` (boolean) and `authUser` (name pattern) but never a credentials path. |
 
 ### 3.5 Interfaces
 
 | ID | Requirement |
 |----|-------------|
-| FR-26 | CLI: `--auth`, `--user <name>` and `--credentials <file>` on `discover/generate/run/heal/all`; new `auth-check <url> [--user]`; `list-test-cases` shows an `AUTH` column (`user` name or `-`) and `requiresAuth`/`user` in `--json`. |
+| FR-26 | CLI: `--auth`, `--user <name>` and `--credentials <file>` on `discover/generate/run/heal/all`; new `auth-check <url> [--user]`; `list-test-cases` shows an `AUTH` column (`user` name or `-`; only when at least one test needs auth, so the existing layout is unchanged) and `requiresAuth`/`user` in `--json`. |
 | FR-27 | Web: run settings have a **Logged-in testing** toggle and a user selector (names only; disabled with a hint when no credentials are configured for the URL's site); journeys and tests with `requiresAuth` show an **auth** badge. |
 | FR-28 | README documents the credentials file, the secret-handling guarantees and the limitations. |
 

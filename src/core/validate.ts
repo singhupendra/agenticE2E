@@ -1,6 +1,7 @@
 import path from 'node:path';
 import ts from 'typescript';
 import { packageRoot } from './paths.js';
+import type { Redactor } from './redact.js';
 import { SUPPORT_SOURCE } from './support.js';
 
 export interface Validation { ok: boolean; errors: string[] }
@@ -89,8 +90,11 @@ function check(code: string): string[] {
   });
 }
 
-export async function validateSpec(code: string): Promise<Validation> {
+export async function validateSpec(code: string, opts: { redactor?: Redactor } = {}): Promise<Validation> {
   const errors: string[] = [];
+  // SPEC-009: a literal credential in generated code is never acceptable. Report lines only, never the value.
+  const leaked = opts.redactor?.linesWithSecrets(code) ?? [];
+  if (leaked.length) errors.push(`contains a literal credential value (line ${leaked.join(', ')}); never write credentials into a spec — use credentials.username / credentials.password from the test fixtures`);
   const clean = stripComments(code);
   if (!/from\s+['"]\.\/_support(\.js|\.ts)?['"]/.test(clean)) errors.push("must import { test, expect } from './_support' (not directly from '@playwright/test')");
   if (!/\btest\s*\(/.test(clean)) errors.push('must define at least one test( ... ) block');

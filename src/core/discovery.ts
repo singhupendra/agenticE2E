@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium, type Browser, type Page } from 'playwright';
+import { isDestructiveLink } from './safety.js';
 import type { PageModel } from './types.js';
 
 export interface CrawlOptions {
@@ -13,6 +14,8 @@ export interface CrawlOptions {
   fullPage?: boolean;
   onPage?: (p: PageModel) => void;
   browser?: Browser;
+  /** SPEC-009: Playwright storageState file of a logged-in user; the crawl then runs as that user. */
+  storageState?: string;
 }
 
 const SKIP_EXT = /\.(pdf|zip|gz|tar|png|jpe?g|gif|svg|webp|ico|mp4|mp3|mov|avi|css|js|json|xml|txt|woff2?|ttf|dmg|exe)$/i;
@@ -74,12 +77,13 @@ const EXTRACT_SCRIPT = `(() => {
     if (navLinks.length >= 30) break;
   }
   const headings = [...document.querySelectorAll('h1, h2, h3')].map((h) => clean(h.textContent)).filter(Boolean).slice(0, 12);
-  const links = [...document.querySelectorAll('a[href]')].map((a) => a.href);
-  return { title: document.title, elements: els, forms, navLinks, headings, links };
+  const linkItems = [...document.querySelectorAll('a[href]')].map((a) => ({ href: a.href, text: clean(a.getAttribute('aria-label') || a.textContent) }));
+  const links = linkItems.map((l) => l.href);
+  return { title: document.title, elements: els, forms, navLinks, headings, links, linkItems };
 })()`;
 
 interface Extracted {
-  title: string; elements: PageModel['elements']; forms: PageModel['forms']; navLinks: PageModel['navLinks']; headings: string[]; links: string[];
+  title: string; elements: PageModel['elements']; forms: PageModel['forms']; navLinks: PageModel['navLinks']; headings: string[]; links: string[]; linkItems: { href: string; text: string }[];
 }
 
 function canonical(href: string, origin: string): string | null {
@@ -94,14 +98,14 @@ function canonical(href: string, origin: string): string | null {
   }
 }
 
-async function capture(page: Page, url: string, depth: number): Promise<{ model: PageModel; links: string[] }> {
+export async function capture(page: Page, url: string, depth: number): Promise<{ model: PageModel; links: string[] }> {
   const ex = (await page.evaluate(EXTRACT_SCRIPT)) as Extracted;
   let aria = '';
   try { aria = (await page.locator('body').ariaSnapshot({ timeout: 5000 })).slice(0, 6000); } catch { /* best effort */ }
   const u = new URL(page.url());
   return {
     model: { url: url, path: u.pathname + u.search, title: ex.title, depth, headings: ex.headings, ariaSnapshot: aria, elements: ex.elements, forms: ex.forms, navLinks: ex.navLinks },
-    links: ex.links,
+    links: ex.linkItems.filter((l) => !isDestructiveLink(l.text, l.href)).map((l) => l.href),
   };
 }
 
@@ -111,7 +115,7 @@ export async function crawl(startUrl: string, opts: CrawlOptions): Promise<PageM
   const origin = start.origin;
   const deadline = Date.now() + opts.timeoutMs;
   const browser = opts.browser ?? (await chromium.launch({ headless: opts.headless }));
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(opts.storageState ? { storageState: opts.storageState } : {}) });
   const pages: PageModel[] = [];
   const seen = new Set<string>([canonical(start.href, origin) ?? start.href]);
   const queue: { url: string; depth: number }[] = [{ url: start.href, depth: 0 }];

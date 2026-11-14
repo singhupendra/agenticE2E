@@ -1,5 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
+import { authUserFor } from '../core/auth.js';
 import { configSchema, type Config } from '../core/config.js';
+import { DEFAULT_CREDENTIALS_FILE, loadCredentials } from '../core/credentials.js';
 import { createContext, discover, generate, healSelected, run, runAll } from '../core/pipeline.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { normalizeSite } from '../core/storage.js';
@@ -18,7 +21,7 @@ export interface Job {
 }
 
 /** Options a web client may override per job. dataDir/model-provider internals are deliberately excluded. */
-const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true }).partial()
+const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true }).partial()
   .extend({ awsProfile: configSchema.shape.awsProfile.unwrap().nullable().optional() }).strict();
 
 /** Effective config for a job: server config overlaid with the client's options. */
@@ -73,9 +76,13 @@ export class JobManager {
     const site = normalizeSite(req.url).id;
     const busy = this.running(site);
     if (busy) throw Object.assign(new Error(`A job (${busy.id}) is already running for ${site}`), { statusCode: 409 });
+    const config = mergeJobConfig(this.base, req.options);
+    if (config.auth) { // fail fast (400) on a missing/unsafe credentials file or an unknown user, before a job exists
+      const credentials = loadCredentials({ file: config.credentialsFile ?? path.resolve(DEFAULT_CREDENTIALS_FILE), explicit: !!config.credentialsFile });
+      authUserFor({ config, credentials }, req.url);
+    }
     const job: Job = { id: randomUUID(), action: req.action, url: req.url, site, status: 'running', startedAt: new Date().toISOString(), events: [] };
     this.jobs.set(job.id, job);
-    const config = mergeJobConfig(this.base, req.options);
     const ctx = createContext({ config, llm: this.llm, onProgress: (e) => this.emit(job, e) });
     void (async () => {
       try {
@@ -86,12 +93,13 @@ export class JobManager {
           case 'heal': job.result = await healSelected(ctx, req.url, { ids: req.journeyIds, failedOnly: req.failedOnly }); break;
           case 'all': job.result = await runAll(ctx, req.url, { rediscover: req.rediscover, regenerate: req.regenerate }); break;
         }
+        job.result = ctx.redactor.redactDeep(job.result);
         job.status = 'done';
         job.finishedAt = new Date().toISOString();
         this.emit(job, { type: 'done', message: `${req.action} finished`, data: job.result });
       } catch (e) {
         job.status = 'error';
-        job.error = (e as Error).message;
+        job.error = ctx.redact((e as Error).message);
         job.finishedAt = new Date().toISOString();
         this.emit(job, { type: 'error', message: job.error });
       }

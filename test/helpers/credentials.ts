@@ -17,7 +17,7 @@ export function fixtureCreds(host: string, extra: Record<string, unknown> = {}) 
   return {
     [host]: {
       users: { member: { username: FIXTURE_USER, password: FIXTURE_PASSWORD, pin: '48151623' } },
-      login: { loginUrl: '/login', checkUrl: '/account', successUrl: '/account' },
+      login: { loginUrl: '/login', usernameSelector: 'input[name=email]', passwordSelector: 'input[name=password]', submitSelector: 'button[type=submit]', checkUrl: '/account', successUrl: '/account' },
       ...extra,
     },
   };

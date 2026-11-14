@@ -2,6 +2,7 @@
  * Source of the `_support.ts` file written next to every site's generated tests.
  * Generated specs `import { test, expect } from './_support'`. It adds:
  *  - a `step(name, fn)` fixture (wraps test.step and takes per-step screenshots)
+ *  - a `credentials` fixture ({ username, password }) read from the env vars the runner injects (SPEC-009)
  *  - an auto fixture that takes end-of-journey / on-failure screenshots and dumps a
  *    DOM + ARIA snapshot on failure so the healer can see the page as it was.
  * Behaviour is driven by env vars set by the runner.
@@ -35,8 +36,14 @@ async function shot(page: Page, journey: string, name: string): Promise<string |
 
 export const test = base.extend<{
   step: <T>(name: string, body: () => Promise<T>) => Promise<T>;
+  credentials: { username: string; password: string };
   _agentic: void;
 }>({
+  // SPEC-009: injected by the runner (E2E_USERNAME / E2E_PASSWORD) only for runs with authenticated tests.
+  // Specs cannot touch process.env themselves, so this trusted file is the only place the values are read.
+  credentials: async ({}, use) => {
+    await use({ username: process.env.E2E_USERNAME ?? '', password: process.env.E2E_PASSWORD ?? '' });
+  },
   step: async ({ page }, use, testInfo) => {
     const journey = path.basename(testInfo.file).replace(/\\.spec\\.[tj]s$/, '');
     let n = 0;
