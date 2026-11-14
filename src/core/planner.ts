@@ -24,17 +24,36 @@ const PROPOSE_SYSTEM = `You are a senior QA engineer designing end-to-end user j
 Propose realistic, automatable journeys (e.g. search, login, signup, add-to-cart, navigation, contact form).
 Rules: only use pages/elements that appear in the models; each journey has a short name, a one-sentence goal, a priority, and 2-8 ordered concrete steps that name the visible labels/buttons involved and the expected observable outcome of the last step. Do not invent credentials; avoid journeys that need real accounts or payments unless clearly stubbed.`;
 
-export async function proposeJourneys(llm: LLMProvider, pages: PageModel[]): Promise<Journey[]> {
+const AUTH_ADDENDUM = (user: string, names: string[]) => `
+
+LOGGED-IN MODE: the pages were captured while logged in as the test user "${user}" (available users: ${names.join(', ')}).
+Journeys that need the logged-in session (account, orders, settings, dashboards, ...) are welcome: set "requiresAuth": true and "user" to one of the available user names. Leave requiresAuth unset for journeys that work anonymously.
+Never put real credentials, e-mail addresses or other account identifiers in steps; refer to them as {{username}} / {{password}}. Do not propose logging out, deleting or removing data, cancelling subscriptions, payments or any destructive or irreversible action.`;
+
+export interface ProposeOptions { auth?: { user: string; userNames: string[] } }
+
+const PROPOSE_SYSTEM_AUTH = `You are a senior QA engineer designing end-to-end user journeys for a website, from compact models of its pages.
+Propose realistic, automatable journeys (e.g. search, navigation, account management, orders, settings).
+Rules: only use pages/elements that appear in the models; each journey has a short name, a one-sentence goal, a priority, and 2-8 ordered concrete steps that name the visible labels/buttons involved and the expected observable outcome of the last step.`;
+
+export async function proposeJourneys(llm: LLMProvider, pages: PageModel[], opts: ProposeOptions = {}): Promise<Journey[]> {
   if (!pages.length) throw new Error('No pages to plan from');
+  const auth = opts.auth;
+  const system = auth ? PROPOSE_SYSTEM_AUTH + AUTH_ADDENDUM(auth.user, auth.userNames) : PROPOSE_SYSTEM;
   const prompt = `Site pages (${pages.length}):\n\n${pages.map((p) => pageToPrompt(p)).join('\n\n')}\n\nPropose candidate user journeys.`;
-  const out = await llm.structured({ name: 'propose_journeys', description: 'Propose candidate user journeys for the site.', system: PROPOSE_SYSTEM, prompt, schema: journeyProposalSchema });
+  const out = await llm.structured({ name: 'propose_journeys', description: 'Propose candidate user journeys for the site.', system, prompt, schema: journeyProposalSchema });
   const used = new Set<string>();
   return out.journeys.map((j) => {
     const base = slugify(j.name);
     let id = base;
     for (let i = 2; used.has(id); i++) id = `${base}-${i}`;
     used.add(id);
-    return { id, name: j.name, goal: j.goal, priority: j.priority, tags: j.tags ?? [], steps: j.steps, status: 'proposed' as const };
+    const journey: Journey = { id, name: j.name, goal: j.goal, priority: j.priority, tags: j.tags ?? [], steps: j.steps, status: 'proposed' };
+    if (auth && j.requiresAuth) {
+      journey.requiresAuth = true;
+      journey.user = j.user && auth.userNames.includes(j.user) ? j.user : auth.user;
+    }
+    return journey;
   });
 }
 

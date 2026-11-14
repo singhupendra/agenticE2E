@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ModelInfo } from '../../src/core/llm/models';
 import type { HealRecord, Journey, ProgressEvent } from '../../src/core/types';
-import { api, streamJob, type HealJobPayload, type RunDetail, type Settings, type SiteDetail, type SiteSummary, type TestCaseRow, type TestDetail } from './api';
+import { api, streamJob, type AuthInfo, type HealJobPayload, type RunDetail, type Settings, type SiteDetail, type SiteSummary, type TestCaseRow, type TestDetail } from './api';
 
 type Tab = 'journeys' | 'tests' | 'code' | 'runs' | 'heals' | 'screenshots';
 const ACTIONS = ['discover', 'generate', 'run', 'heal', 'all'] as const;
@@ -67,6 +67,7 @@ export function App() {
             <label><input type="checkbox" checked={rediscover} onChange={(e) => setRediscover(e.target.checked)} /> rediscover</label>
             <label><input type="checkbox" checked={regenerate} onChange={(e) => setRegenerate(e.target.checked)} /> regenerate code</label>
           </div>
+          {settings && <AuthControl url={url} s={settings} set={setSettings} />}
           {settings && <SettingsForm s={settings} set={setSettings} />}
           {error && <p className="error">{error}</p>}
         </section>
@@ -149,6 +150,41 @@ function AwsProfilePicker({ value, onChange }: { value: string | null | undefine
   );
 }
 
+/** Logged-in testing: toggle + user *name* selector. Credentials stay on the server; this only ever sees names. */
+function AuthControl({ url, s, set }: { url: string; s: Settings; set: (s: Settings) => void }) {
+  const [info, setInfo] = useState<AuthInfo | null>(null);
+  useEffect(() => {
+    let live = true;
+    try { new URL(url); } catch { setInfo(null); return; }
+    api.authInfo(url).then((r) => {
+      if (!live) return;
+      setInfo(r);
+      // never leave a stale "logged-in" job option behind for a site that has no credentials / no such user
+      const ok = r.configured && r.users.length > 0;
+      if (s.auth && (!ok || (s.authUser && !r.users.includes(s.authUser)))) { const { authUser: _u, ...rest } = s; set({ ...rest, auth: ok ? s.auth : false }); }
+    }).catch(() => { if (live) setInfo(null); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+  const available = !!info?.configured && info.users.length > 0;
+  const setAuth = (auth: boolean) => { const { authUser: _u, ...rest } = s; set({ ...rest, auth }); };
+  const setUser = (u: string) => { const { authUser: _u, ...rest } = s; set(u ? { ...rest, authUser: u } : rest); };
+  return (
+    <div className="row" data-testid="auth-control">
+      <label className="check"><input type="checkbox" checked={s.auth && available} disabled={!available} onChange={(e) => setAuth(e.target.checked)} /> Logged-in testing</label>
+      {available && s.auth && (
+        <label>User
+          <select value={s.authUser ?? ''} onChange={(e) => setUser(e.target.value)} aria-label="Test user">
+            <option value="">Default user</option>
+            {info!.users.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </label>
+      )}
+      {!available && <small className="muted">{info?.error ? `Credentials unusable: ${info.error}` : 'No credentials for this site — add them to .agentic-e2e/credentials.json (see README).'}</small>}
+    </div>
+  );
+}
+
 function SettingsForm({ s, set }: { s: Settings; set: (s: Settings) => void }) {
   const up = <K extends keyof Settings>(k: K, v: Settings[K]) => set({ ...s, [k]: v });
   const list = (v: string) => v.split(',').map((x) => x.trim()).filter(Boolean);
@@ -201,6 +237,7 @@ function Journeys({ site, journeys, onSaved }: { site: string; journeys: Journey
             <select value={j.priority} onChange={(e) => upd(i, { priority: e.target.value as Journey['priority'] })}>{['high', 'medium', 'low'].map((p) => <option key={p}>{p}</option>)}</select>
             <select value={j.status} onChange={(e) => upd(i, { status: e.target.value as Journey['status'] })}>{['proposed', 'selected', 'approved', 'rejected'].map((p) => <option key={p}>{p}</option>)}</select>
           </div>
+          {j.requiresAuth && <small><span className="badge">auth{j.user ? `: ${j.user}` : ''}</span></small>}
           <input value={j.goal} onChange={(e) => upd(i, { goal: e.target.value })} aria-label={`goal ${j.id}`} />
           <textarea rows={Math.max(3, j.steps.length + 1)} value={j.steps.join('\n')} onChange={(e) => upd(i, { steps: e.target.value.split('\n').filter((l) => l.trim()) })} aria-label={`steps ${j.id}`} />
           {j.rationale && <small className="muted">LLM rank {j.rank}: {j.rationale}</small>}
@@ -235,7 +272,7 @@ function Tests({ site, busy, version, onHeal }: { site: string; busy: boolean; v
       {rows.map((t) => (
         <label key={t.journeyId} className={`result test-${t.lastRun.outcome}`}>
           <input type="checkbox" checked={picked.has(t.journeyId)} onChange={() => toggle(t.journeyId)} aria-label={`select ${t.journeyId}`} />{' '}
-          <b>{t.journeyId}</b> <small>{t.name}</small> <span className="badge">{t.lastRun.outcome.replace('_', ' ')}</span>
+          <b>{t.journeyId}</b> <small>{t.name}</small> {t.requiresAuth && <span className="badge">auth{t.user ? `: ${t.user}` : ''}</span>} <span className="badge">{t.lastRun.outcome.replace('_', ' ')}</span>
           {t.lastRun.error && <small className="muted"> {t.lastRun.error}</small>}
         </label>
       ))}

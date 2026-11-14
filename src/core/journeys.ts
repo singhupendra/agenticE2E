@@ -11,6 +11,8 @@ export const journeySchema = z.object({
   status: z.enum(['proposed', 'selected', 'approved', 'rejected']),
   rank: z.number().optional(),
   rationale: z.string().optional(),
+  requiresAuth: z.boolean().optional(),
+  user: z.string().optional(),
 });
 
 /** Validate user-edited journeys (CLI --edit, REST PUT). */

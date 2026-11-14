@@ -27,6 +27,12 @@ export const configSchema = z.object({
   codegenRetries: z.number().int().min(0).default(2),
   requireApproval: z.boolean().default(false),
   testTimeoutMs: z.number().int().positive().default(30_000),
+  /** SPEC-009: where the (never committed) credentials live; unset = `.agentic-e2e/credentials.json` if present. */
+  credentialsFile: z.string().min(1).optional(),
+  /** SPEC-009: logged-in testing. */
+  auth: z.boolean().default(false),
+  /** SPEC-009: which named user of the credentials file to use (names only; never a secret). */
+  authUser: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, 'must be a user name from the credentials file').optional(),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -40,6 +46,7 @@ const ENV_MAP: Record<string, { key: keyof Config; parse: (v: string) => unknown
   AGENTIC_E2E_SCREENSHOTS: { key: 'screenshots', parse: String },
   AGENTIC_E2E_FULL_PAGE: { key: 'fullPage', parse: (v) => v === 'true' || v === '1' },
   AGENTIC_E2E_DATA_DIR: { key: 'dataDir', parse: String },
+  AGENTIC_E2E_CREDENTIALS: { key: 'credentialsFile', parse: String },
 };
 
 function stripUndefined<T extends object>(o: T | undefined): Partial<T> {
@@ -68,6 +75,7 @@ export function resolveConfig(opts: {
   }
   const cfg = parsed.data;
   cfg.dataDir = path.resolve(opts.cwd ?? process.cwd(), cfg.dataDir);
+  if (cfg.credentialsFile) cfg.credentialsFile = path.resolve(opts.cwd ?? process.cwd(), cfg.credentialsFile);
   return cfg;
 }
 

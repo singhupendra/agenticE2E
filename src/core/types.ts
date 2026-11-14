@@ -12,6 +12,10 @@ export interface Journey {
   status: JourneyStatus;
   rank?: number;
   rationale?: string;
+  /** SPEC-009: the journey needs the logged-in session (set by the planner in auth mode). */
+  requiresAuth?: boolean;
+  /** SPEC-009: name of the credentials-file user the journey runs as (a name, never a secret). */
+  user?: string;
 }
 
 export interface ElementInfo {

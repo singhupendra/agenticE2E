@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { HealRecord, Journey, PageModel, RunRecord, SiteMeta } from './types.js';
 import { SUPPORT_SOURCE } from './support.js';
+import { Redactor } from './redact.js';
 
 const SITE_RE = /^[a-z0-9][a-z0-9._-]*$/;
 const ID_RE = /^[a-z0-9][a-z0-9_-]*$/;
@@ -26,13 +27,20 @@ function readJson<T>(file: string): T | null {
   if (!fs.existsSync(file)) return null;
   return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 }
-function writeJson(file: string, data: unknown) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n');
-}
 
 export class Store {
-  constructor(public readonly dataDir: string) {}
+  /** SPEC-009: everything persisted goes through `redactor`, so a credential value can never land in data/. */
+  constructor(public readonly dataDir: string, private readonly redactor: Redactor = Redactor.empty()) {}
+
+  redact(s: string): string { return this.redactor.redact(s); }
+  private writeJson(file: string, data: unknown) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, this.redactor.redact(JSON.stringify(data, null, 2)) + '\n');
+  }
+
+  /** Playwright storageState of a logged-in user (contains session cookies: gitignored, 0600, never served). */
+  authDir(site: string) { return path.join(this.siteDir(site), 'auth'); }
+  authStatePath(site: string, user: string) { return path.join(this.authDir(site), `${this.checkId(user, SAFE_RE)}.json`); }
 
   siteDir(site: string): string {
     if (!SITE_RE.test(site) || site.includes('..')) throw new Error(`Invalid site id: ${JSON.stringify(site)}`);
@@ -58,7 +66,7 @@ export class Store {
   saveSite(meta: SiteMeta) {
     this.ensureSite(meta.id);
     const prev = this.loadSite(meta.id);
-    writeJson(path.join(this.siteDir(meta.id), 'site.json'), { ...prev, ...meta, updatedAt: new Date().toISOString() });
+    this.writeJson(path.join(this.siteDir(meta.id), 'site.json'), { ...prev, ...meta, updatedAt: new Date().toISOString() });
   }
   loadSite(site: string): SiteMeta | null { return readJson<SiteMeta>(path.join(this.siteDir(site), 'site.json')); }
   listSites(): SiteMeta[] {
@@ -67,14 +75,14 @@ export class Store {
     return fs.readdirSync(root).filter((d) => SITE_RE.test(d)).map((d) => this.loadSite(d)).filter((x): x is SiteMeta => !!x);
   }
 
-  saveJourneys(site: string, journeys: Journey[]) { writeJson(path.join(this.siteDir(site), 'journeys.json'), journeys); }
+  saveJourneys(site: string, journeys: Journey[]) { this.writeJson(path.join(this.siteDir(site), 'journeys.json'), journeys); }
   loadJourneys(site: string): Journey[] | null { return readJson<Journey[]>(path.join(this.siteDir(site), 'journeys.json')); }
-  savePages(site: string, pages: PageModel[]) { writeJson(path.join(this.siteDir(site), 'pages.json'), pages); }
+  savePages(site: string, pages: PageModel[]) { this.writeJson(path.join(this.siteDir(site), 'pages.json'), pages); }
   loadPages(site: string): PageModel[] | null { return readJson<PageModel[]>(path.join(this.siteDir(site), 'pages.json')); }
 
   saveTest(site: string, id: string, code: string) {
     this.ensureSite(site);
-    fs.writeFileSync(this.testFile(site, id), code);
+    fs.writeFileSync(this.testFile(site, id), this.redactor.redact(code));
   }
   loadTest(site: string, id: string): string | null {
     const f = this.testFile(site, id);
@@ -92,7 +100,7 @@ export class Store {
   saveTestVersion(site: string, id: string, name: string, code: string) {
     const f = this.versionFile(site, id, name);
     fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, code);
+    fs.writeFileSync(f, this.redactor.redact(code));
   }
   loadTestVersion(site: string, id: string, name: string): string | null {
     const f = this.versionFile(site, id, name);
@@ -105,7 +113,7 @@ export class Store {
 
   appendHeal(site: string, rec: HealRecord) {
     const f = path.join(this.siteDir(site), 'heals.json');
-    writeJson(f, [...(readJson<HealRecord[]>(f) ?? []), rec]);
+    this.writeJson(f, [...(readJson<HealRecord[]>(f) ?? []), rec]);
   }
   loadHeals(site: string): HealRecord[] { return readJson<HealRecord[]>(path.join(this.siteDir(site), 'heals.json')) ?? []; }
 
@@ -118,7 +126,7 @@ export class Store {
     return { id, dir, screenshotsDir: path.join(this.siteDir(site), 'screenshots', id) };
   }
   runDir(site: string, runId: string) { return path.join(this.siteDir(site), 'runs', this.checkId(runId, SAFE_RE)); }
-  saveRun(site: string, run: RunRecord) { writeJson(path.join(this.runDir(site, run.id), 'result.json'), run); }
+  saveRun(site: string, run: RunRecord) { this.writeJson(path.join(this.runDir(site, run.id), 'result.json'), run); }
   loadRun(site: string, runId: string): RunRecord | null { return readJson<RunRecord>(path.join(this.runDir(site, runId), 'result.json')); }
   listRuns(site: string): RunRecord[] {
     const d = path.join(this.siteDir(site), 'runs');

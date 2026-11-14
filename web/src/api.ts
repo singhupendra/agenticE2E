@@ -4,7 +4,11 @@ import type { HealRecord, Journey, ProgressEvent, ScreenshotMode } from '../../s
 export interface Settings {
   screenshots: ScreenshotMode; fullPage: boolean; maxJourneys: number; maxPages: number; maxDepth: number;
   healAttempts: number; provider: ProviderId; model: string; awsProfile?: string | null; requireApproval: boolean; include: string[]; exclude: string[]; headless: boolean;
+  /** SPEC-009: logged-in testing; `authUser` is a user *name* from the server's credentials file (omitted = default user). */
+  auth: boolean; authUser?: string;
 }
+/** SPEC-009: names only; the server never sends usernames, passwords or paths. */
+export interface AuthInfo { configured: boolean; users: string[]; error?: string }
 export interface SiteSummary { id: string; origin: string; url: string; journeys: number; tests: number; runs: number; lastRun: { id: string; passed: number; total: number } | null }
 export interface RunSummary { id: string; kind: string; startedAt: string; screenshots: string; results: { journeyId: string; status: string }[] }
 export interface SiteDetail {
@@ -12,7 +16,7 @@ export interface SiteDetail {
   tests: { id: string; versions: string[] }[]; runs: RunSummary[]; heals: HealRecord[];
 }
 export type LastRunOutcome = 'passed' | 'failed' | 'skipped' | 'healed' | 'never_run';
-export interface TestCaseRow { journeyId: string; name: string; journeyStatus: string; lastRun: { outcome: LastRunOutcome; at?: string; error?: string } }
+export interface TestCaseRow { journeyId: string; name: string; journeyStatus: string; requiresAuth?: boolean; user?: string; lastRun: { outcome: LastRunOutcome; at?: string; error?: string } }
 export interface HealJobPayload { journeyIds?: string[]; failedOnly?: boolean }
 export interface TestDetail { id: string; code: string; versions: { name: string; code: string }[] }
 export interface RunDetail { id: string; results: { journeyId: string; status: string; durationMs: number; error?: string; screenshots: string[]; tracePath?: string; failure?: { url: string; screenshot?: string } }[] }
@@ -28,6 +32,7 @@ export const api = {
   config: () => fetch('/api/config').then((r) => j<Settings>(r)),
   models: (provider: ProviderId) => fetch(`/api/models?provider=${provider}`).then((r) => j<{ provider: ProviderId; models: ModelInfo[] }>(r)),
   awsProfiles: () => fetch('/api/aws-profiles').then((r) => j<{ profiles: string[]; selected?: string }>(r)),
+  authInfo: (url: string) => fetch(`/api/auth?url=${encodeURIComponent(url)}`).then((r) => j<AuthInfo>(r)),
   sites: () => fetch('/api/sites').then((r) => j<SiteSummary[]>(r)),
   site: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}`).then((r) => j<SiteDetail>(r)),
   test: (id: string, t: string) => fetch(`/api/sites/${encodeURIComponent(id)}/tests/${encodeURIComponent(t)}`).then((r) => j<TestDetail>(r)),

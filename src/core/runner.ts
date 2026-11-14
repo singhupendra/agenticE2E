@@ -16,6 +16,11 @@ export interface RunOptions {
   testTimeoutMs: number;
   kind?: RunRecord['kind'];
   onProgress?: ProgressFn;
+  /**
+   * SPEC-009: tests in `journeyIds` run in a Playwright project with this storageState; `env` (E2E_USERNAME/E2E_PASSWORD)
+   * is injected into the test process. Tracing is off because traces embed cookies and typed values.
+   */
+  auth?: { storageState: string; env: Record<string, string>; journeyIds: string[] };
 }
 
 const ENV_ALLOW = /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TEMP|TMP|LANG|LANGUAGE|TZ|SystemRoot|SYSTEMROOT|COMSPEC|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|XDG_[A-Z_]+|LC_[A-Z_]+|PLAYWRIGHT_[A-Z_]+|DISPLAY)$/;
@@ -63,16 +68,24 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   const configFile = path.join(run.dir, 'playwright.config.mjs');
   const rootDir = packageRoot();
 
+  const authIds = new Set(opts.auth?.journeyIds ?? []);
+  const projects = opts.auth && authIds.size
+    ? [
+      ...(ids.some((id) => !authIds.has(id)) ? [{ name: 'public', testMatch: ids.filter((id) => !authIds.has(id)).map((id) => `**/${id}.spec.ts`) }] : []),
+      { name: 'authenticated', testMatch: ids.filter((id) => authIds.has(id)).map((id) => `**/${id}.spec.ts`), use: { storageState: opts.auth.storageState } },
+    ]
+    : undefined;
   fs.writeFileSync(configFile, `export default ${JSON.stringify({
     testDir: store.testsDir(opts.site),
     testMatch: '**/*.spec.ts',
+    ...(projects ? { projects } : {}),
     outputDir: artifacts,
     timeout: opts.testTimeoutMs,
     retries: 0,
     expect: { timeout: Math.round(opts.testTimeoutMs / 3) },
     workers: 2,
     reporter: [['json', { outputFile: jsonFile }]],
-    use: { baseURL: opts.baseUrl, headless: opts.headless, trace: 'retain-on-failure', actionTimeout: Math.round(opts.testTimeoutMs / 3), navigationTimeout: Math.round(opts.testTimeoutMs / 2), viewport: { width: 1280, height: 800 } },
+    use: { baseURL: opts.baseUrl, headless: opts.headless, trace: opts.auth ? 'off' : 'retain-on-failure', actionTimeout: Math.round(opts.testTimeoutMs / 3), navigationTimeout: Math.round(opts.testTimeoutMs / 2), viewport: { width: 1280, height: 800 } },
   }, null, 2)};\n`);
 
   const cli = createRequire(path.join(rootDir, 'package.json')).resolve('@playwright/test/cli');
@@ -90,6 +103,7 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
         AGENTIC_E2E_FAILURE_DIR: failuresDir,
         FORCE_COLOR: '0',
         CI: '1',
+        ...(opts.auth?.env ?? {}),
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -100,11 +114,16 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
     child.on('error', reject);
     child.on('close', () => { clearTimeout(timer); resolve(buf); });
   });
-  fs.writeFileSync(path.join(run.dir, 'output.log'), output);
+  const redactedOutput = store.redact(output);
+  fs.writeFileSync(path.join(run.dir, 'output.log'), redactedOutput);
 
   let report: PwReport = {};
   if (fs.existsSync(jsonFile)) {
-    try { report = JSON.parse(fs.readFileSync(jsonFile, 'utf8')) as PwReport; } catch { /* handled below */ }
+    try {
+      const raw = store.redact(fs.readFileSync(jsonFile, 'utf8'));
+      fs.writeFileSync(jsonFile, raw);
+      report = JSON.parse(raw) as PwReport;
+    } catch { /* handled below */ }
   }
   const rel = (p: string) => path.relative(siteDir, p);
   const byId = new Map<string, TestResult>();
@@ -119,7 +138,9 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
       let failure: FailureSnapshot | undefined;
       const fj = path.join(failuresDir, `${id}.json`);
       if (status !== 'passed' && fs.existsSync(fj)) {
-        const f = JSON.parse(fs.readFileSync(fj, 'utf8')) as FailureSnapshot;
+        const rawFailure = store.redact(fs.readFileSync(fj, 'utf8'));
+        fs.writeFileSync(fj, rawFailure);
+        const f = JSON.parse(rawFailure) as FailureSnapshot;
         failure = { ...f, screenshot: f.screenshot ? rel(f.screenshot) : undefined };
       }
       byId.set(id, {
@@ -135,7 +156,7 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   for (const id of ids) {
     if (byId.has(id)) continue;
     const mine = topErrors.filter((m) => m.includes(`${id}.spec.ts`));
-    const error = (mine.length ? mine : topErrors).join('\n') || output.replace(ANSI, '').slice(-2000) || 'Test did not produce a result';
+    const error = (mine.length ? mine : topErrors).join('\n') || redactedOutput.replace(ANSI, '').slice(-2000) || 'Test did not produce a result';
     byId.set(id, { journeyId: id, file: `tests/${id}.spec.ts`, status: 'failed', durationMs: 0, error, screenshots: [] });
   }
 

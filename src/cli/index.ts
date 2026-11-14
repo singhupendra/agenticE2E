@@ -9,6 +9,7 @@ import { loadConfig, type PartialConfig, type Config } from '../core/config.js';
 import { parseJourneys, setStatus } from '../core/journeys.js';
 import { listModels, resolveModelId, PROVIDERS, type ProviderId } from '../core/llm/models.js';
 import { healSummary } from '../core/healer.js';
+import { ensureSession } from '../core/auth.js';
 import { createContext, discover, generate, healSelected, run, runAll, type Context, type HealTestOutcome } from '../core/pipeline.js';
 import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases, type LastRun } from '../core/test-cases.js';
@@ -33,7 +34,10 @@ function addCommon(cmd: Command): Command {
     .option('--include <pattern...>', 'only journeys matching these (substring or /regex/)')
     .option('--exclude <pattern...>', 'skip journeys matching these')
     .option('--heal-attempts <n>', 'max heal attempts per failing test', num)
-    .option('--require-approval', 'only generate tests for journeys you approved');
+    .option('--require-approval', 'only generate tests for journeys you approved')
+    .option('--auth', 'logged-in mode: crawl, generate and run as a user from the credentials file (SPEC-009)')
+    .option('--user <name>', 'which user of the credentials file to log in as (with --auth)')
+    .option('--credentials <file>', 'credentials file (default: .agentic-e2e/credentials.json; never commit it)');
 }
 
 function cliConfig(o: Record<string, unknown>): PartialConfig {
@@ -53,6 +57,9 @@ function cliConfig(o: Record<string, unknown>): PartialConfig {
     exclude: o.exclude as string[] | undefined,
     healAttempts: o.healAttempts as number | undefined,
     requireApproval: o.requireApproval ? true : undefined,
+    auth: o.auth ? true : undefined,
+    authUser: o.user as string | undefined,
+    credentialsFile: o.credentials as string | undefined,
   };
 }
 
@@ -176,6 +183,20 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (r.final.some((f) => f.status !== 'passed')) setExit(1);
     });
 
+  program.command('auth-check <url>').description('log in with the credentials file and refresh the stored session (storageState) for a site')
+    .option('--user <name>', 'user of the credentials file (default: defaultUser / the only user)')
+    .option('--credentials <file>', 'credentials file (default: .agentic-e2e/credentials.json)')
+    .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
+    .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
+    .option('--headed', 'run the browser headed')
+    .option('--provider <name>').option('--model <id>').option('--aws-region <region>').option('--aws-profile <name>')
+    .action(async (url: string, o) => {
+      const meta = normalizeSite(url);
+      const ctx = await ctxFrom({ ...o, auth: true });
+      const s = await ensureSession(ctx, url, { user: o.user, force: true });
+      console.log(`Login OK for user "${s.user}" on ${meta.id}; session saved to ${ctx.store.authStatePath(meta.id, s.user)}`);
+    });
+
   program.command('models').description('list known Claude models for a provider')
     .option('--provider <name>', 'anthropic | bedrock (default: configured provider)')
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
@@ -226,7 +247,8 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (o.json) return console.log(JSON.stringify(listing, null, 2));
       if (!listing.tests.length) return console.log(`No generated tests for ${site.id} yet. Run: agentic-e2e generate ${url}`);
       const lastRun = (r: LastRun) => (r.outcome === 'never_run' ? 'never run' : `${r.outcome} ${r.at ?? ''}`.trim());
-      const rows = [['JOURNEY', 'NAME', 'STATUS', 'LAST RUN', 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, lastRun(t.lastRun), t.specFile])];
+      const anyAuth = listing.tests.some((t) => t.requiresAuth); // the AUTH column only appears once a test needs a login
+      const rows = [['JOURNEY', 'NAME', 'STATUS', ...(anyAuth ? ['AUTH'] : []), 'LAST RUN', 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, ...(anyAuth ? [t.requiresAuth ? t.user ?? 'yes' : '-'] : []), lastRun(t.lastRun), t.specFile])];
       const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
       console.log(`${site.id}: ${listing.tests.length} test${listing.tests.length === 1 ? '' : 's'}`);
       for (const r of rows) console.log(r.map((cell, c) => (c === r.length - 1 ? cell : cell.padEnd(widths[c]))).join('  '));

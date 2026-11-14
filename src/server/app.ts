@@ -4,6 +4,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { listAwsProfiles } from '../core/aws-profiles.js';
 import type { Config } from '../core/config.js';
+import { CredentialsError, DEFAULT_CREDENTIALS_FILE, loadCredentials, publicError } from '../core/credentials.js';
 import { HealSelectionError, resolveHealSelection, UnknownSiteError } from '../core/heal-selection.js';
 import { parseJourneys } from '../core/journeys.js';
 import { listModels, PROVIDERS, type ProviderId } from '../core/llm/models.js';
@@ -57,7 +58,7 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
 
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
-    const { dataDir: _d, maxTokens: _m, awsRegion: _r, ...pub } = opts.config;
+    const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, ...pub } = opts.config;
     return pub;
   });
   app.get<{ Querystring: { provider?: string } }>('/api/models', async (req, reply) => {
@@ -67,6 +68,18 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   });
   // Profile *names* only; never keys, secrets or tokens.
   app.get('/api/aws-profiles', async () => ({ profiles: listAwsProfiles(opts.awsEnv ?? process.env), ...(opts.config.awsProfile ? { selected: opts.config.awsProfile } : {}) }));
+  // SPEC-009: names only. Never usernames, passwords, hints' selectors, file paths or storageState contents.
+  app.get<{ Querystring: { url?: string } }>('/api/auth', async (req, reply) => {
+    let site: string;
+    try { site = normalizeSite(req.query.url ?? '').id; } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
+    try {
+      const creds = loadCredentials({ file: opts.config.credentialsFile ?? path.resolve(DEFAULT_CREDENTIALS_FILE), explicit: !!opts.config.credentialsFile });
+      return { configured: creds.hasSite(site), users: creds.userNames(site) };
+    } catch (e) {
+      console.error(`[agentic-e2e] GET /api/auth: ${(e as Error).message}`); // detail (path, env var names) stays server-side
+      return { configured: false, users: [], error: publicError(e) };
+    }
+  });
   app.get('/api/sites', async () => store.listSites().map((s) => {
     const runs = store.listRuns(s.id);
     const last = runs.at(-1);
@@ -162,7 +175,8 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
       const job = jobs.start(jr);
       return reply.code(202).send({ jobId: job.id });
     } catch (e) {
-      return reply.code((e as { statusCode?: number }).statusCode ?? 500).send({ error: (e as Error).message });
+      if (e instanceof CredentialsError) console.error(`[agentic-e2e] POST /api/jobs: ${e.message}`);
+      return reply.code((e as { statusCode?: number }).statusCode ?? 500).send({ error: publicError(e) });
     }
   });
   app.get('/api/jobs', async () => jobs.list());

@@ -1,6 +1,7 @@
 import type { LLMProvider } from './llm/types.js';
 import { codeSchema } from './llm/schemas.js';
 import { pageToPrompt } from './planner.js';
+import type { Redactor } from './redact.js';
 import type { Store } from './storage.js';
 import type { Journey, PageModel, ProgressFn } from './types.js';
 import { validateSpec } from './validate.js';
@@ -20,29 +21,37 @@ export function stripFences(code: string): string {
   return (m ? m[1] : code).replace(/\s+$/, '') + '\n';
 }
 
-export interface SpecInput { journey: Journey; pages: PageModel[]; baseUrl: string }
+const AUTH_CODEGEN_ADDENDUM = (user: string) => `
+
+This journey needs the logged-in test user "${user}". The browser context is ALREADY logged in (a stored session is applied before the test starts): go straight to the protected pages and do not log in, unless the journey is about the login flow itself.
+If the journey needs the account credentials (e.g. a "confirm your password" form), take them from the test fixtures: async ({ page, step, credentials }) => { ... credentials.username / credentials.password ... }.
+NEVER write credential values, e-mail addresses of the account or invented passwords as literals; the real values appear only as {{username}} / {{password}} placeholders and any literal secret makes the spec invalid. Never click log out, delete, remove or cancel actions.`;
+
+export interface SpecInput { journey: Journey; pages: PageModel[]; baseUrl: string; /** set in logged-in mode */ auth?: { user: string } }
 
 function journeyPrompt({ journey, pages, baseUrl }: SpecInput): string {
   return `Site: ${baseUrl}\n\nJourney\nid: ${journey.id}\nname: ${journey.name}\ngoal: ${journey.goal}\nsteps:\n${journey.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nPage models:\n\n${pages.map((p) => pageToPrompt(p, { elements: 30, aria: 1000 })).join('\n\n')}\n\nWrite the Playwright spec for this journey.`;
 }
 
-export async function generateSpec(llm: LLMProvider, input: SpecInput, opts: { retries: number }): Promise<{ code: string; attempts: number }> {
+export async function generateSpec(llm: LLMProvider, input: SpecInput, opts: { retries: number; redactor?: Redactor }): Promise<{ code: string; attempts: number }> {
+  const system = input.auth && input.journey.requiresAuth ? CODEGEN_SYSTEM + AUTH_CODEGEN_ADDENDUM(input.journey.user ?? input.auth.user) : CODEGEN_SYSTEM;
   let prompt = journeyPrompt(input);
   let lastErrors: string[] = [];
   const maxAttempts = opts.retries + 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const out = await llm.structured({ name: 'write_playwright_spec', description: 'Return the Playwright spec source.', system: CODEGEN_SYSTEM, prompt, schema: codeSchema });
+    const out = await llm.structured({ name: 'write_playwright_spec', description: 'Return the Playwright spec source.', system, prompt, schema: codeSchema });
     const code = stripFences(out.code);
-    const v = await validateSpec(code);
+    const v = await validateSpec(code, { redactor: opts.redactor });
     if (v.ok) return { code, attempts: attempt };
     lastErrors = v.errors;
-    prompt = `${journeyPrompt(input)}\n\nYour previous attempt was INVALID:\n\n${code}\n\nDiagnostics:\n${v.errors.map((e) => `- ${e}`).join('\n')}\n\nFix every diagnostic and return the complete corrected spec.`;
+    prompt = `${journeyPrompt(input)}\n\nYour previous attempt was INVALID:\n\n${opts.redactor ? opts.redactor.redact(code) : code}\n\nDiagnostics:\n${v.errors.map((e) => `- ${e}`).join('\n')}\n\nFix every diagnostic and return the complete corrected spec.`;
   }
   throw new Error(`Generated spec for "${input.journey.id}" failed validation after ${maxAttempts} attempts: ${lastErrors.join('; ')}`);
 }
 
 export interface GenerateOptions {
   site: string; baseUrl: string; pages: PageModel[]; retries: number; requireApproval: boolean; regenerate?: boolean; onProgress?: ProgressFn;
+  /** SPEC-009 */ redactor?: Redactor; authUser?: string;
 }
 export interface GenerateResult { generated: string[]; skipped: string[]; failed: { id: string; error: string }[] }
 
@@ -57,7 +66,7 @@ export async function generateTests(store: Store, llm: LLMProvider, journeys: Jo
     }
     opts.onProgress?.({ type: 'info', stage: 'generate', message: `Generating test for "${journey.name}"` });
     try {
-      const { code, attempts } = await generateSpec(llm, { journey, pages: opts.pages, baseUrl: opts.baseUrl }, { retries: opts.retries });
+      const { code, attempts } = await generateSpec(llm, { journey, pages: opts.pages, baseUrl: opts.baseUrl, ...(opts.authUser ? { auth: { user: opts.authUser } } : {}) }, { retries: opts.retries, redactor: opts.redactor });
       store.saveTest(opts.site, journey.id, code);
       store.saveTestVersion(opts.site, journey.id, 'original', code);
       res.generated.push(journey.id);
