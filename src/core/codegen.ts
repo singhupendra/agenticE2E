@@ -1,4 +1,5 @@
 import { LLMBudgetError, type LLMProvider } from './llm/types.js';
+import { withLLMScope } from './llm/scope.js';
 import { codeSchema } from './llm/schemas.js';
 import { pageToPrompt } from './planner.js';
 import type { Redactor } from './redact.js';
@@ -66,7 +67,7 @@ export async function generateTests(store: Store, llm: LLMProvider, journeys: Jo
     }
     opts.onProgress?.({ type: 'info', stage: 'generate', message: `Generating test for "${journey.name}"` });
     try {
-      const { code, attempts } = await generateSpec(llm, { journey, pages: opts.pages, baseUrl: opts.baseUrl, ...(opts.authUser ? { auth: { user: opts.authUser } } : {}) }, { retries: opts.retries, redactor: opts.redactor });
+      const { code, attempts } = await withLLMScope({ journeyId: journey.id }, () => generateSpec(llm, { journey, pages: opts.pages, baseUrl: opts.baseUrl, ...(opts.authUser ? { auth: { user: opts.authUser } } : {}) }, { retries: opts.retries, redactor: opts.redactor }));
       store.saveTest(opts.site, journey.id, code);
       store.saveTestVersion(opts.site, journey.id, 'original', code);
       res.generated.push(journey.id);

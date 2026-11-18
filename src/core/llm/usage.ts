@@ -17,6 +17,9 @@ export interface LLMCallRecord extends LLMTokenUsage {
   ok: boolean;
   error?: string;
   at: string;
+  /** FR-31: journey (and browser/device project) the call was spent on; absent for run-level calls (planning, login) */
+  journeyId?: string;
+  project?: string;
 }
 
 export interface UsageTotals {
@@ -65,33 +68,39 @@ export class UsageTracker {
     return rec;
   }
 
-  totals(): UsageTotals {
-    const t = emptyTotals();
-    for (const c of this.calls) {
-      t.calls++;
-      if (!c.ok) t.failed++;
-      if (c.cached) t.cached++;
-      t.retries += c.retries;
-      t.inputTokens += c.inputTokens; t.outputTokens += c.outputTokens; t.cacheReadTokens += c.cacheReadTokens; t.cacheWriteTokens += c.cacheWriteTokens;
-      t.latencyMs += c.latencyMs;
-      if (c.costUsd === undefined) { if (!c.cached) t.unpricedCalls++; } else t.costUsd += c.costUsd;
-    }
-    t.totalTokens = t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens;
-    return t;
-  }
+  totals(): UsageTotals { return summarizeCalls(this.calls); }
 
   /** FR-15: before a call, refuse when a limit is already reached; after a call, throw when one is exceeded. */
   check(phase: 'before' | 'after'): void {
-    const { maxCostPerRun, maxTokensPerRun } = this.budget;
-    if (maxCostPerRun === undefined && maxTokensPerRun === undefined) return;
-    const t = this.totals();
-    const over = (spent: number, max: number) => (phase === 'before' ? spent >= max : spent > max);
-    const tail = `after ${t.calls} call${t.calls === 1 ? '' : 's'}; LLM work stopped.`;
-    if (maxCostPerRun !== undefined && over(t.costUsd, maxCostPerRun)) {
-      throw new LLMBudgetError(`LLM budget exceeded: estimated cost ${fmtUsd(t.costUsd)} ${phase === 'before' ? 'reached' : 'exceeds'} llmBudget.maxCostPerRun ${fmtUsd(maxCostPerRun)} ${tail} Raise llmBudget.maxCostPerRun (--max-cost) or narrow the run (--max-journeys, --include).`);
-    }
-    if (maxTokensPerRun !== undefined && over(t.totalTokens, maxTokensPerRun)) {
-      throw new LLMBudgetError(`LLM budget exceeded: ${fmtInt(t.totalTokens)} tokens ${phase === 'before' ? 'reached' : 'exceed'} llmBudget.maxTokensPerRun ${fmtInt(maxTokensPerRun)} ${tail} Raise llmBudget.maxTokensPerRun (--max-tokens-per-run) or narrow the run (--max-journeys, --include).`);
-    }
+    checkBudget(this.budget, this.totals(), phase);
+  }
+}
+
+/** Totals of a list of call records (a run, a journey, ...). */
+export function summarizeCalls(calls: readonly LLMCallRecord[]): UsageTotals {
+  const t = emptyTotals();
+  for (const c of calls) {
+    t.calls++;
+    if (!c.ok) t.failed++;
+    if (c.cached) t.cached++;
+    t.retries += c.retries;
+    t.inputTokens += c.inputTokens; t.outputTokens += c.outputTokens; t.cacheReadTokens += c.cacheReadTokens; t.cacheWriteTokens += c.cacheWriteTokens;
+    t.latencyMs += c.latencyMs;
+    if (c.costUsd === undefined) { if (!c.cached) t.unpricedCalls++; } else t.costUsd += c.costUsd;
+  }
+  t.totalTokens = t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens;
+  return t;
+}
+
+function checkBudget(budget: LLMBudget, t: UsageTotals, phase: 'before' | 'after'): void {
+  const { maxCostPerRun, maxTokensPerRun } = budget;
+  if (maxCostPerRun === undefined && maxTokensPerRun === undefined) return;
+  const over = (spent: number, max: number) => (phase === 'before' ? spent >= max : spent > max);
+  const tail = `after ${t.calls} call${t.calls === 1 ? '' : 's'}; LLM work stopped.`;
+  if (maxCostPerRun !== undefined && over(t.costUsd, maxCostPerRun)) {
+    throw new LLMBudgetError(`LLM budget exceeded: estimated cost ${fmtUsd(t.costUsd)} ${phase === 'before' ? 'reached' : 'exceeds'} llmBudget.maxCostPerRun ${fmtUsd(maxCostPerRun)} ${tail} Raise llmBudget.maxCostPerRun (--max-cost) or narrow the run (--max-journeys, --include).`);
+  }
+  if (maxTokensPerRun !== undefined && over(t.totalTokens, maxTokensPerRun)) {
+    throw new LLMBudgetError(`LLM budget exceeded: ${fmtInt(t.totalTokens)} tokens ${phase === 'before' ? 'reached' : 'exceed'} llmBudget.maxTokensPerRun ${fmtInt(maxTokensPerRun)} ${tail} Raise llmBudget.maxTokensPerRun (--max-tokens-per-run) or narrow the run (--max-journeys, --include).`);
   }
 }

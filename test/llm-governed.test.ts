@@ -168,15 +168,15 @@ describe('SPEC-013 response cache', () => {
     expect(p2.calls).toHaveLength(0);
   });
 
-  it('key depends on model, schema and images; invalid entries are misses', () => {
+  it('key depends on model, schema and images; invalid entries are misses', async () => {
     const c = new ResponseCache({ dir: tmp(), mode: 'read-write' });
     const k = c.key(req(), { provider: 'anthropic', model: 'a' });
     expect(k).toMatch(/^[0-9a-f]{64}$/);
     expect(c.key(req(), { provider: 'anthropic', model: 'b' })).not.toBe(k);
     expect(c.key({ ...req(), schema: z.object({ other: z.string() }) } as never, { provider: 'anthropic', model: 'a' })).not.toBe(k);
     expect(c.key({ ...req(), images: [{ mediaType: 'image/png', data: 'AAA' }] }, { provider: 'anthropic', model: 'a' })).not.toBe(k);
-    c.set(k, { name: 'n', model: 'a', output: { nope: 1 } });
-    expect(c.get(k, schema)).toBeUndefined();
+    await c.set(k, { name: 'n', model: 'a', output: { nope: 1 } });
+    expect(await c.get(k, schema)).toBeUndefined();
   });
 
   it('read-only never writes; off disables', async () => {

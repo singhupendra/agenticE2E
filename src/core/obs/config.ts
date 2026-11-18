@@ -15,6 +15,10 @@ export const obsConfigShape = {
   llmTimeoutMs: z.number().int().positive().default(300_000),
   promptCaching: z.boolean().default(true),
   llmCache: z.enum(LLM_CACHE_MODES).default('off'),
+  /** FR-23: append-only audit log at `<dataDir>/audit.jsonl` (default on). */
+  auditLog: z.boolean().default(true),
+  /** FR-26: `auto` = export spans when an OTLP endpoint env var is set; `off` = never (even with the env set). */
+  tracing: z.enum(['auto', 'off']).default('auto'),
 };
 
 /** env var -> config key (parsed as strings; zod validates). */
@@ -25,4 +29,4 @@ export const OBS_ENV_MAP = {
 } as const;
 
 /** Keys a web client must not override per job (the server's budget protects its credits; logging is the operator's). */
-export const OBS_SERVER_ONLY_KEYS = ['logLevel', 'logFormat', 'llmBudget', 'llmMaxRetries', 'llmTimeoutMs', 'promptCaching'] as const;
+export const OBS_SERVER_ONLY_KEYS = ['logLevel', 'logFormat', 'llmBudget', 'llmMaxRetries', 'llmTimeoutMs', 'promptCaching', 'auditLog', 'tracing'] as const;

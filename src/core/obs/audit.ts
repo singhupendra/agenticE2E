@@ -49,20 +49,28 @@ function lastHash(file: string): string {
   }
 }
 
-/** SPEC-013 FR-23..25: append-only, hash-chained audit log at `<dataDir>/audit.jsonl`. */
+/**
+ * SPEC-013 FR-23..25: append-only, hash-chained audit log at `<dataDir>/audit.jsonl`. Deliberately a local file with
+ * O_APPEND writes rather than a SPEC-014 StorageBackend object: the backend interface has no append, and emulating one
+ * with read-modify-write would make the log rewritable (and racy), defeating "append-only".
+ */
 export class AuditLog {
   readonly file: string;
   private readonly actor: string;
   private readonly correlationId?: string;
   private readonly redactor: Redactor;
-  constructor(opts: { file: string; actor: string; correlationId?: string; redactor?: Redactor }) {
+  /** `auditLog: false` → appends are no-ops (nothing is written). */
+  readonly enabled: boolean;
+  constructor(opts: { file: string; actor: string; correlationId?: string; redactor?: Redactor; enabled?: boolean }) {
+    this.enabled = opts.enabled ?? true;
     this.file = opts.file;
     this.actor = opts.actor;
     this.correlationId = opts.correlationId;
     this.redactor = opts.redactor ?? Redactor.empty();
   }
 
-  append(action: AuditAction, o: { site?: string; details?: Record<string, unknown>; actor?: string } = {}): AuditEntry {
+  append(action: AuditAction, o: { site?: string; details?: Record<string, unknown>; actor?: string } = {}): AuditEntry | null {
+    if (!this.enabled) return null;
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const base: Omit<AuditEntry, 'hash'> = this.redactor.redactDeep({
       at: new Date().toISOString(), actor: o.actor ?? this.actor, action, ...(o.site ? { site: o.site } : {}),

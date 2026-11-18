@@ -10,6 +10,7 @@ import { createLLMProvider } from './llm/index.js';
 import { RedactingLLM } from './llm/redacting.js';
 import type { LLMProvider } from './llm/types.js';
 import { Redactor } from './redact.js';
+import { withLLMScope } from './llm/scope.js';
 import { createObservability, type Observability, type ObservabilityOptions } from './obs/index.js';
 import { proposeJourneys, selectJourneys } from './planner.js';
 import { runTests } from './runner.js';
@@ -223,10 +224,10 @@ export async function heal(ctx: Context, url: string, failedRun: RunRecord): Pro
   if (!failures.length) return records;
   stage(ctx, 'heal', `Healing ${failures.length} failing test(s) (up to ${ctx.config.healAttempts} attempts each)`);
   for (const f of failures) {
-    const rec = await healTest(ctx.store, ctx.getLLM(), {
+    const rec = await withLLMScope({ journeyId: f.journeyId }, () => healTest(ctx.store, ctx.getLLM(), {
       site: meta.id, baseUrl: ctx.environment?.baseUrl ?? meta.origin, journeyId: f.journeyId, failure: f, attempts: ctx.config.healAttempts,
       runner: async (ids) => { const r = await run(ctx, url, { journeyIds: ids, kind: 'heal-rerun' }); return { ...r, results: aggregateByJourney(r.results) }; }, onProgress: ctx.onProgress, redactor: ctx.redactor,
-    });
+    }));
     records.push(rec);
     if (rec.outcome === 'healed' && rec.diff) {
       const lines = rec.diff.split('\n');

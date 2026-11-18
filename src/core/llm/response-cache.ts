@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
 import { Redactor } from '../redact.js';
+import type { StorageBackend } from '../storage/backend.js';
+import { FilesystemBackend } from '../storage/filesystem.js';
 import type { StructuredRequest } from './types.js';
 
 export const LLM_CACHE_MODES = ['off', 'read-write', 'read-only'] as const;
@@ -22,14 +22,16 @@ function canonical(v: unknown): string {
 
 /**
  * SPEC-013 FR-21/22: deterministic, opt-in cache of *parsed* LLM outputs keyed by a hash of the (already redacted) request.
- * For re-runs and CI. `read-only` never writes.
+ * For re-runs and CI. `read-only` never writes. Entries live under `prefix` of a StorageBackend (SPEC-014 FR-30);
+ * `dir` is shorthand for a filesystem backend rooted there.
  */
 export class ResponseCache {
   readonly mode: LLMCacheMode;
-  private readonly dir: string;
+  private readonly storage: StorageBackend;
+  private readonly prefix: string;
   private readonly redactor: Redactor;
-  constructor(opts: { dir: string; mode: LLMCacheMode; redactor?: Redactor }) {
-    this.dir = opts.dir;
+  constructor(opts: { mode: LLMCacheMode; redactor?: Redactor } & ({ dir: string } | { storage: StorageBackend; prefix?: string })) {
+    if ('storage' in opts) { this.storage = opts.storage; this.prefix = opts.prefix ?? 'llm-cache/'; } else { this.storage = new FilesystemBackend(opts.dir); this.prefix = ''; }
     this.mode = opts.mode;
     this.redactor = opts.redactor ?? Redactor.empty();
   }
@@ -44,30 +46,27 @@ export class ResponseCache {
     }));
   }
 
-  private file(key: string) {
+  private keyPath(key: string) {
     if (!/^[0-9a-f]{64}$/.test(key)) throw new Error('Invalid cache key');
-    return path.join(this.dir, key.slice(0, 2), `${key}.json`);
+    return `${this.prefix}${key.slice(0, 2)}/${key}.json`;
   }
 
   /** The cached output if present and still valid for `schema`; anything else is a miss. */
-  get<T>(key: string, schema: z.ZodType<T>): T | undefined {
+  async get<T>(key: string, schema: z.ZodType<T>): Promise<T | undefined> {
     if (!this.readable) return undefined;
     try {
-      const entry = JSON.parse(fs.readFileSync(this.file(key), 'utf8')) as CacheEntry;
-      const parsed = schema.safeParse(entry.output);
+      const buf = await this.storage.read(this.keyPath(key));
+      if (!buf) return undefined;
+      const parsed = schema.safeParse((JSON.parse(buf.toString('utf8')) as CacheEntry).output);
       return parsed.success ? parsed.data : undefined;
     } catch {
       return undefined;
     }
   }
 
-  set(key: string, e: { name: string; model: string; output: unknown }): void {
+  async set(key: string, e: { name: string; model: string; output: unknown }): Promise<void> {
     if (!this.writable) return;
-    const f = this.file(key);
-    fs.mkdirSync(path.dirname(f), { recursive: true });
     const entry: CacheEntry = { key, name: e.name, model: e.model, createdAt: new Date().toISOString(), output: e.output };
-    const tmp = `${f}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, this.redactor.redact(JSON.stringify(entry, null, 2)) + '\n');
-    fs.renameSync(tmp, f);
+    await this.storage.write(this.keyPath(key), this.redactor.redact(JSON.stringify(entry, null, 2)) + '\n'); // atomic replace
   }
 }

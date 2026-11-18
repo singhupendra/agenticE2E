@@ -39,7 +39,7 @@ export function registerObsCommands(program: Command): void {
     .action(async (url: string, o) => {
       const site = normalizeSite(url).id;
       const config = await loadConfig({ configFile: o.config, cli: { dataDir: o.dataDir } });
-      const reports = listUsageReports(config.dataDir, site).slice(0, o.limit ?? undefined);
+      const reports = (await listUsageReports(config.dataDir, site)).slice(0, o.limit ?? undefined);
       if (o.json) return console.log(JSON.stringify(reports, null, 2));
       if (!reports.length) return console.log(`No LLM usage recorded for ${site} yet.`);
       for (const r of reports) console.log(`${r.startedAt}  ${r.action.padEnd(9)} ${r.status === 'ok' ? 'ok   ' : 'ERROR'} ${r.model}  ${formatUsageSummary(r.totals).replace(/^LLM: /, '')}`);

@@ -7,6 +7,7 @@ import { createContext, discover, generate, healSelected, run, runAll } from '..
 import type { LLMProvider } from '../core/llm/types.js';
 import { normalizeSite } from '../core/storage.js';
 import { OBS_SERVER_ONLY_KEYS } from '../core/obs/config.js';
+import type { StorageBackend } from '../core/storage/backend.js';
 import { formatUsageSummary, type UsageTotals } from '../core/llm/usage.js';
 import type { ProgressEvent } from '../core/types.js';
 
@@ -63,7 +64,7 @@ export function parseJobRequest(body: unknown): JobRequest {
 export class JobManager {
   private jobs = new Map<string, Job>();
   private listeners = new Map<string, Set<(e: ProgressEvent) => void>>();
-  constructor(private base: Config, private llm?: LLMProvider) {}
+  constructor(private base: Config, private llm?: LLMProvider, private storage?: StorageBackend) {}
 
   get(id: string) { return this.jobs.get(id); }
   list() { return [...this.jobs.values()].map(({ events: _e, ...j }) => j).reverse(); }
@@ -97,7 +98,7 @@ export class JobManager {
     let ctx: ReturnType<typeof createContext>;
     const id = randomUUID(); // SPEC-013: the job id is the run's correlation id
     try {
-      ctx = createContext({ config, llm: this.llm, onProgress: (e) => (job ? this.emit(job, e) : early.push(e)), obs: { correlationId: id, actor: meta.actor ?? 'web:unknown', action: req.action, site } });
+      ctx = createContext({ config, llm: this.llm, onProgress: (e) => (job ? this.emit(job, e) : early.push(e)), obs: { correlationId: id, actor: meta.actor ?? 'web:unknown', action: req.action, site, storage: this.storage } });
     } catch (e) {
       throw (e as { statusCode?: number }).statusCode ? e : Object.assign(e as Error, { statusCode: 400 });
     }

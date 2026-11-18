@@ -12,6 +12,8 @@ import { createLogger, type LogStream, type Logger } from './logger.js';
 import { buildLogRedactor } from './secrets.js';
 import { createTracer, type Span, type Tracer } from './tracing.js';
 import { saveUsageReport, type UsageReport } from './usage-store.js';
+import type { StorageBackend } from '../storage/backend.js';
+import { FilesystemBackend } from '../storage/filesystem.js';
 
 export { formatUsageSummary };
 export type { Logger, Span, Tracer, UsageReport };
@@ -28,6 +30,8 @@ export interface ObservabilityOptions {
   /** secrets + OTLP config (default process.env) */
   env?: Record<string, string | undefined>;
   fetch?: typeof fetch;
+  /** SPEC-014 FR-30: where usage reports and the response cache are stored (default: filesystem on `dataDir`) */
+  storage?: StorageBackend;
 }
 
 export interface Observability {
@@ -61,8 +65,9 @@ export function createObservability(config: Config, credentialSecrets: SecretEnt
     bindings: { correlationId, ...(opts.action ? { action: opts.action } : {}), ...(opts.site ? { site: opts.site } : {}) },
   });
   const usage = new UsageTracker({ budget: config.llmBudget, onWarn: (m) => log.warn(m) });
-  const audit = new AuditLog({ file: path.join(config.dataDir, AUDIT_FILE), actor, correlationId, redactor });
-  const tracer = createTracer({ env, fetch: opts.fetch, redactor, log });
+  const storage = opts.storage ?? new FilesystemBackend(config.dataDir);
+  const audit = new AuditLog({ file: path.join(config.dataDir, AUDIT_FILE), actor, correlationId, redactor, enabled: config.auditLog });
+  const tracer = config.tracing === 'off' ? createTracer({ env: {} }) : createTracer({ env, fetch: opts.fetch, redactor, log });
   const root = tracer.startSpan(`agentic-e2e.${opts.action ?? 'run'}`, {
     traceId: correlationId.replace(/-/g, '').toLowerCase(),
     attributes: { 'agentic_e2e.correlation_id': correlationId, 'agentic_e2e.site': opts.site, 'agentic_e2e.actor': actor },
@@ -79,7 +84,7 @@ export function createObservability(config: Config, credentialSecrets: SecretEnt
         ...provider, usage, log, tracer,
         parentSpan: () => stageSpan ?? root,
         retry: { maxRetries: config.llmMaxRetries, timeoutMs: config.llmTimeoutMs },
-        cache: config.llmCache === 'off' ? undefined : new ResponseCache({ dir: path.join(config.dataDir, 'llm-cache'), mode: config.llmCache, redactor }),
+        cache: config.llmCache === 'off' ? undefined : new ResponseCache({ storage, prefix: 'llm-cache/', mode: config.llmCache, redactor }),
       });
     },
     progress(e) {
@@ -107,7 +112,7 @@ export function createObservability(config: Config, credentialSecrets: SecretEnt
           id: correlationId, action, site, actor, startedAt, finishedAt: new Date().toISOString(), status: o.status,
           ...(o.error ? { error: o.error } : {}), ...provider, ...(config.llmBudget ? { budget: config.llmBudget } : {}), totals, calls: usage.calls,
         };
-        saveUsageReport(config.dataDir, site, report, redactor);
+        await saveUsageReport(storage, site, report, redactor);
         return report;
       } catch (e) {
         log.warn({ error: (e as Error).message }, 'obs.finish_failed');

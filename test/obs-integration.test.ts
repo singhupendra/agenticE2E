@@ -80,10 +80,12 @@ describe('SPEC-013 pipeline wiring', () => {
 
     expect(report).not.toBeNull();
     expect(report!.totals.calls).toBe(5); // propose, rank, 2x codegen, heal
-    const stored = listUsageReports(dataDir, r.site);
+    const stored = await listUsageReports(dataDir, r.site);
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ id: ctx.obs.correlationId, action: 'all', status: 'ok', actor: 'cli:tester' });
     expect(stored[0].calls.map((c) => c.name)).toEqual(['propose_journeys', 'rank_journeys', 'write_playwright_spec', 'write_playwright_spec', 'heal_test']);
+    // FR-31: codegen and heal calls are attributed to their journey; planning calls are not
+    expect(stored[0].calls.map((c) => c.journeyId)).toEqual([undefined, undefined, 'search-for-a-product', 'contact-form', 'contact-form']);
 
     const logs = lines.map((l) => JSON.parse(l));
     expect(logs.length).toBeGreaterThan(0);
@@ -125,7 +127,7 @@ describe('SPEC-013 pipeline wiring', () => {
     expect(e).toBeInstanceOf(LLMBudgetError);
     expect(e.message).toMatch(/maxTokensPerRun/);
     await ctx.obs.finish({ action: 'all', site, status: 'error', error: e.message });
-    expect(listUsageReports(dataDir, site)[0]).toMatchObject({ status: 'error', totals: { calls: 1 } });
+    expect((await listUsageReports(dataDir, site))[0]).toMatchObject({ status: 'error', totals: { calls: 1 } });
   });
 });
 
@@ -156,7 +158,7 @@ describe('SPEC-013 server', () => {
     expect(job.usage).toMatchObject({ calls: 2 });
     const site = normalizeSite(fx.url).id;
     const usage = (await app.inject(`/api/sites/${site}/usage`)).json();
-    expect(usage.reports[0]).toMatchObject({ id: jobId, action: 'discover', actor: 'web:127.0.0.1' });
+    expect(usage.reports[0]).toMatchObject({ id: jobId, action: 'discover', actor: 'web:local@127.0.0.1' });
     expect(usage.totals.calls).toBeGreaterThanOrEqual(2);
     expect((await app.inject('/api/sites/..%2Fetc/usage')).statusCode).toBe(400);
   });
@@ -180,7 +182,7 @@ describe('SPEC-013 server', () => {
     expect(res.statusCode).toBe(200);
     const entries = readAuditLog(path.join(dataDir, 'audit.jsonl'), { site });
     const last = entries.at(-1)!;
-    expect(last).toMatchObject({ action: 'journeys.status_changed', actor: 'web:127.0.0.1' });
+    expect(last).toMatchObject({ action: 'journeys.status_changed', actor: 'web:local@127.0.0.1' });
     expect(last.details).toMatchObject({ changes: [{ id: 'browse', from: 'selected', to: 'rejected' }] });
     expect(entries.some((e) => e.action === 'discover')).toBe(true);
   });
@@ -199,7 +201,7 @@ describe('SPEC-013 cli', () => {
   it('AC-21: usage <url> lists reports, --json prints them', async () => {
     setup();
     const totals = { calls: 3, failed: 0, cached: 1, retries: 0, inputTokens: 1200, outputTokens: 300, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 1500, costUsd: 0.0123, unpricedCalls: 0, latencyMs: 10 };
-    saveUsageReport(dir, 'example.com', { id: 'c-1', action: 'generate', site: 'example.com', actor: 'cli:x', startedAt: '2026-11-18T00:00:00.000Z', finishedAt: '2026-11-18T00:01:00.000Z', status: 'ok', provider: 'anthropic', model: 'claude-sonnet-5-5', totals, calls: [] });
+    await saveUsageReport(dir, 'example.com', { id: 'c-1', action: 'generate', site: 'example.com', actor: 'cli:x', startedAt: '2026-11-18T00:00:00.000Z', finishedAt: '2026-11-18T00:01:00.000Z', status: 'ok', provider: 'anthropic', model: 'claude-sonnet-5-5', totals, calls: [] });
     expect(await cli('usage', 'https://example.com')).toBe(0);
     expect(out.join('\n')).toMatch(/generate.*3 calls.*\$0\.0123/);
     out.length = 0;

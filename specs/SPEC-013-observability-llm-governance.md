@@ -1,7 +1,8 @@
 # SPEC-013: Observability & LLM governance
 
 - **Status:** Implemented (v0.13)
-- **Depends on:** SPEC-001 (pipeline, storage, server jobs), SPEC-002/005 (providers, Bedrock), SPEC-009 (`Redactor`, secret hygiene)
+- **Depends on:** SPEC-001 (pipeline, storage, server jobs), SPEC-002/005 (providers, Bedrock), SPEC-009 (`Redactor`, secret hygiene);
+  integrates with SPEC-011 (reports), SPEC-012 (browser/device projects), SPEC-014 (strict config, roles, StorageBackend)
 - **Stack:** new `src/core/obs/{logger,secrets,audit,tracing,usage-store,config,index}.ts`, new `src/core/llm/{governed,retry,usage,response-cache}.ts`;
   small edits to `llm/{types,anthropic,index,models}.ts`, `config.ts`, `pipeline.ts`, `codegen.ts`, `healer.ts`, `auth.ts`, `server/{app,jobs}.ts`,
   `cli/index.ts` (+ new `cli/obs-commands.ts`), `web/src`, README
@@ -102,6 +103,15 @@
 | FR-26 | Off by default. Enabled only when `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT` is set and `OTEL_SDK_DISABLED` is not `true`. Spans are POSTed as OTLP/HTTP JSON to `<endpoint>/v1/traces` (or the traces endpoint as-is), with headers from `OTEL_EXPORTER_OTLP_HEADERS` and `service.name` from `OTEL_SERVICE_NAME` (default `agentic-e2e`). |
 | FR-27 | Spans: a root span per command/job (`agentic-e2e.<action>`, trace id = correlation id without dashes), a child span per pipeline stage (from `stage` progress events), and a child span per LLM call with `gen_ai.system`, `gen_ai.request.model`, `gen_ai.operation.name`, `gen_ai.usage.input_tokens`/`output_tokens`, `agentic_e2e.cost_usd`, `agentic_e2e.cached`, `agentic_e2e.retries`; errors set status `ERROR`. Spans are flushed at the end of the command/job. Export failures are logged at `warn` and never fail the command. |
 
+### 3.10 Integration with SPEC-011 / SPEC-012 / SPEC-014
+
+| ID | Requirement |
+|----|-------------|
+| FR-28 | All SPEC-013 keys are part of the SPEC-014 **strict** config schema (`config validate` accepts them; typos get a did-you-mean error): `logLevel`, `logFormat`, `llmBudget{maxCostPerRun,maxTokensPerRun}` (strict), `llmMaxRetries`, `llmTimeoutMs`, `promptCaching`, `llmCache`, `auditLog` (bool, default `true`; `false` = no audit file), `tracing` (`auto` \| `off`, default `auto`; `off` never exports even with an OTLP endpoint). All but `llmCache` are server-only (not job options, not in `/api/config`). |
+| FR-29 | Roles (SPEC-014): `GET /api/sites/:site/usage` and `GET /api/audit?site=&limit=` are reads (viewer+); anonymous requests get 401. Mutations stay admin (`PUT journeys`); a job changing `llmCache` needs admin (it is not an operator run-time option). Responses carry only redacted data and principal *names* — never tokens, hashes, keys or credential values. The web audit actor is `web:<principal name>@<ip>`. |
+| FR-30 | Persistence through the SPEC-014 `StorageBackend`: usage reports (`sites/<site>/usage/<id>.json`) and response-cache entries (`llm-cache/<xx>/<sha256>.json`) are written/read via the backend the server (or CLI, default filesystem) uses. The audit log stays an O_APPEND local file: the backend has no append, and a read-modify-write emulation would make the "append-only" log rewritable and racy. |
+| FR-31 | SPEC-011 reports: every LLM call is attributed to a journey when made inside codegen or heal (async-context scope); planning/login calls are unattributed. `summary.json` gets `llm: { totals, unattributed }` and each journey × browser/device row gets `llm` (the usage of its journey, shared by the journey's project rows — sum `llm.totals`, not the rows). `report.html` adds an LLM column and a usage line. Reports of commands without LLM calls are unchanged. `ci` persists its usage report too. |
+
 ## 4. Acceptance criteria
 
 | ID | Given / When / Then |
@@ -127,6 +137,10 @@
 | AC-19 | **Given** a web job **then** `GET /api/jobs/:id` has `usage` totals, the SSE stream has an `info` event with `stage: "llm"` before `done`, and `GET /api/sites/:site/usage` lists the report. **Given** a job request with `options.llmBudget` **then** 400. |
 | AC-20 | **Given** config file/env/CLI values for the new keys **then** they resolve with precedence CLI > env > file and are validated (`logLevel: "loud"` → error). |
 | AC-21 | **Given** the CLI `usage <url> --json` **then** it prints the stored reports as JSON; without `--json` one line per report. |
+| AC-22 | **Given** a config file with every SPEC-013 key **then** `config validate` exits 0; `logLevl` / `llmBudget.maxCost` / `tracing: on` are rejected. `auditLog: false` writes no audit file; `tracing: off` exports nothing despite `OTEL_EXPORTER_OTLP_ENDPOINT`. |
+| AC-23 | **Given** token auth **then** a viewer can `GET` usage and audit, anonymous gets 401, a viewer's `PUT journeys` is 403, an admin's is audited as `web:admin-user@127.0.0.1`, an operator job with `llmCache` is 403, and `llmBudget` in job options is 400. |
+| AC-24 | **Given** a recording StorageBackend **then** usage reports and cache entries are written through it under `sites/<site>/usage/` and `llm-cache/`; invalid site or report ids are rejected. |
+| AC-25 | **Given** calls for journeys `a` (codegen + heal) and `b` and one planning call, and a run with chromium + firefox rows **then** each `a` row has 2 calls / `a`'s cost, each `b` row 1 call, `llm.totals` has 4 calls and `llm.unattributed` 1; the HTML has an LLM column; with no calls there are no `llm` fields. Concurrent scopes do not mix. |
 
 ## 5. Security notes
 

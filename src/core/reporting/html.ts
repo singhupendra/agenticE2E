@@ -1,6 +1,9 @@
 import { firstLine, type ReportTest, type RunReport } from './model.js';
+import { formatUsageSummary, type UsageTotals } from '../llm/usage.js';
 
 const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+/** SPEC-013: `$0.0123 · 3 calls` */
+const fmtLlm = (u: UsageTotals | undefined) => (u ? `$${u.costUsd.toFixed(4)} · ${u.calls} call${u.calls === 1 ? '' : 's'}` : '');
 const fmtMs = (ms: number) => (ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
 
 const CSS = `
@@ -46,7 +49,7 @@ export function renderHtml(r: RunReport, opts: { href: (rel: string) => string |
   const status = totals.failed ? 'failed' : 'passed';
   const tiles = ([['tests', totals.tests], ['passed', totals.passed], ['failed', totals.failed], ['healed', totals.healed], ['skipped', totals.skipped], ['flaky', totals.flaky]] as const)
     .map(([k, v]) => `<div class="tile"><b>${v}</b>${k}</div>`).join('');
-  const rows = r.tests.map((t) => `<tr><td><a href="#t-${esc(t.journeyId)}">${esc(t.journeyId)}</a></td><td>${esc(t.name)}</td><td class="o o-${t.outcome}">${esc(t.outcome)}</td><td>${t.flaky ? `<span class="flaky">flaky</span>` : ''}</td><td>${fmtMs(t.durationMs)}</td><td>${t.attempts}</td><td>${esc(firstLine(t.error, 160))}</td></tr>`).join('\n');
+  const rows = r.tests.map((t) => `<tr><td><a href="#t-${esc(t.journeyId)}">${esc(t.journeyId)}</a></td><td>${esc(t.name)}</td><td class="o o-${t.outcome}">${esc(t.outcome)}</td><td>${t.flaky ? `<span class="flaky">flaky</span>` : ''}</td><td>${fmtMs(t.durationMs)}</td><td>${t.attempts}</td><td>${esc(firstLine(t.error, 160))}</td>${r.llm ? `<td>${esc(fmtLlm(t.llm))}</td>` : ''}</tr>`).join('\n');
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>agentic-e2e ${esc(r.mode)} — ${esc(r.site.id)} — ${esc(status)}</title><style>${CSS}</style></head>
@@ -54,7 +57,8 @@ export function renderHtml(r: RunReport, opts: { href: (rel: string) => string |
 <h1>agentic-e2e report — ${esc(r.site.id)} <span class="o o-${status}">${esc(status)}</span></h1>
 <div class="meta">${esc(r.mode)} · run <code>${esc(r.run.id)}</code> (${esc(r.run.kind)}) · started ${esc(r.run.startedAt)} · ${fmtMs(r.run.durationMs)} · ${esc(r.site.origin)}</div>
 <div class="tiles">${tiles}</div>
-<table><thead><tr><th>Test</th><th>Name</th><th>Outcome</th><th>Flaky</th><th>Duration</th><th>Attempts</th><th>Error</th></tr></thead>
+${r.llm ? `<p class="meta">${esc(formatUsageSummary(r.llm.totals))} (estimated; planning/login: ${esc(fmtLlm(r.llm.unattributed) || 'none')}). Per-row LLM figures are per journey and shared by its browser/device rows.</p>` : ''}
+<table><thead><tr><th>Test</th><th>Name</th><th>Outcome</th><th>Flaky</th><th>Duration</th><th>Attempts</th><th>Error</th>${r.llm ? '<th>LLM</th>' : ''}</tr></thead>
 <tbody>
 ${rows}
 </tbody></table>
