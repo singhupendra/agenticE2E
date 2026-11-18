@@ -50,7 +50,7 @@
 | any other `GET /api/*` | viewer |
 | `POST /api/jobs` with `action` `run` or `heal` | operator |
 | `POST /api/jobs` with `discover`, `generate`, `all` | admin |
-| `POST /api/jobs` whose `options` *change* a setting (any key other than the run-time keys `screenshots, fullPage, headless, healAttempts, include, exclude, testTimeoutMs, timeoutMs, auth, authUser`, with a value different from the server config) | admin |
+| `POST /api/jobs` whose `options` *change* a setting (any key other than the run-time keys `screenshots, fullPage, headless, healAttempts, include, exclude, testTimeoutMs, timeoutMs, auth, authUser` and the SPEC-011/012 knobs `browsers, devices, workers, shard, env, grep, tag, globalTimeoutMs, trace, video, retries`, with a value different from the server config) | admin |
 | `PUT /api/sites/:site/journeys` (approve / reject / edit) | admin |
 | any other mutating `/api/*` request (secure default) | admin |
 

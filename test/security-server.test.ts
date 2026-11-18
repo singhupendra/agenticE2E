@@ -95,6 +95,15 @@ describe('SPEC-014 roles & tokens', () => {
     expect(put.statusCode).toBe(403);
   });
 
+  it('AC-7: operator may pick SPEC-011/012 run-time options (browsers, env, tags, retries…) but not report paths', async () => {
+    const run = (options: Record<string, unknown>, role: keyof typeof T = 'operator') => app.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer(role), ...json }, payload: { action: 'run', url: 'ftp://invalid', options } });
+    for (const o of [{ browsers: ['firefox'] }, { devices: ['iPhone 15'] }, { workers: 4 }, { shard: '1/2' }, { grep: 'checkout' }, { tag: ['smoke'] }, { trace: 'on' }, { video: 'on' }, { retries: 2 }, { globalTimeoutMs: 1000 }]) {
+      expect((await run(o)).statusCode, JSON.stringify(o)).toBe(400); // reached the handler (invalid url), i.e. authorised
+    }
+    expect((await run({ reportDir: '/tmp/x' })).statusCode).toBe(403);
+    expect((await run({ reportDir: '/tmp/x' }, 'admin')).statusCode).toBe(400);
+  });
+
   it('AC-8: admin passes authorisation for discover and journey edits', async () => {
     const disc = await app.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('admin'), ...json }, payload: { action: 'discover', url: 'ftp://invalid' } });
     expect(disc.statusCode).toBe(400); // reached the handler

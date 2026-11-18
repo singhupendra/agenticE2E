@@ -324,7 +324,7 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:4173/api/sites
 | Role | Can |
 |------|-----|
 | `viewer` | read everything (`GET /api/*`) |
-| `operator` | + `run` and `heal` jobs (run-time options only: screenshots, headless, filters, heal attempts, logged-in user…) |
+| `operator` | + `run` and `heal` jobs (run-time options only: screenshots, headless, filters, heal attempts, logged-in user, browsers/devices, environment, tags/grep, workers/shard, retries, trace/video…) |
 | `admin` | + `discover`, `generate`, `all`, approve/reject/edit journeys, change settings (provider, model, AWS profile, limits…) per job |
 
 The web UI asks for a token and exchanges it for an `HttpOnly; SameSite=Strict` session cookie (`POST /api/session`; the token is never stored in the browser). Rotate a token by deleting its entry and creating a new one; raw tokens are never logged, stored or returned.

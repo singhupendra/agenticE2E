@@ -10,6 +10,8 @@ export function roleAtLeast(role: Role, min: Role): boolean { return ROLES.index
 /** Job options an operator may set freely (run-time knobs); every other option is a setting and needs admin to change. */
 export const OPERATOR_JOB_OPTIONS: ReadonlySet<string> = new Set([
   'screenshots', 'fullPage', 'headless', 'healAttempts', 'include', 'exclude', 'testTimeoutMs', 'timeoutMs', 'auth', 'authUser',
+  // SPEC-011/012 run-time knobs (which browsers/devices/environment/tests, parallelism, retries, artifacts). Report paths stay admin.
+  'browsers', 'devices', 'workers', 'shard', 'env', 'grep', 'tag', 'globalTimeoutMs', 'trace', 'video', 'retries',
 ]);
 
 export const OPERATOR_ACTIONS: ReadonlySet<string> = new Set(['run', 'heal']);
