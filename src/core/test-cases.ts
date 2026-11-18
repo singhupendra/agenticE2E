@@ -62,7 +62,7 @@ export function listTestCases(store: Store, siteId: string, opts: ListTestCasesO
   const targets = new Map<string, Map<string, TargetOutcome>>();
   // SPEC-011 flaky detection sees one (aggregated) result per journey and run, and only the selected env's runs.
   const runs = store.listRuns(siteId).filter((run) => !opts.env || run.env === opts.env);
-  const flaky = detectFlaky(runs.map((run) => ({ ...run, results: aggregateByJourney(run.results) })), heals);
+  const flaky = detectFlaky(runs, heals);
   for (const run of runs) {
     for (const result of aggregateByJourney(run.results)) latest.set(result.journeyId, { result, run });
     for (const r of run.results) {

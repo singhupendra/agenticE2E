@@ -185,7 +185,8 @@ export async function run(ctx: Context, url: string, opts: { journeyIds?: string
     return runTests(store, {
       site: meta.id, baseUrl: env?.baseUrl ?? meta.origin, journeyIds: ids, screenshots: config.screenshots, fullPage: config.fullPage,
       headless: config.headless, testTimeoutMs: config.testTimeoutMs, kind: opts.kind, onProgress: ctx.onProgress,
-      targets: resolveTargets(config), workers: config.workers, retries: opts.playwrightRetries ?? config.retries, globalTimeoutMs: config.globalTimeoutMs || undefined,
+      targets: resolveTargets(config), // Heal verification re-runs never retry: a candidate fix must pass on its own (and ci attempts never multiply).
+      workers: config.workers, retries: opts.playwrightRetries ?? (opts.kind === 'heal-rerun' ? 0 : config.retries), globalTimeoutMs: config.globalTimeoutMs || undefined,
       journeyTimeouts, trace: config.trace, video: config.video,
       ...(env ? { env: { name: env.name, baseUrl: env.baseUrl, headers: env.headers } } : {}),
       meta: { ...(shard ? { shard } : {}), ...(hasFilter(filters) ? { filters } : {}) },

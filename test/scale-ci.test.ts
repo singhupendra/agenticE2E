@@ -25,6 +25,9 @@ vi.mock('../src/core/runner.js', () => ({
 const { main } = await import('../src/cli/index.js');
 const { Store } = await import('../src/core/storage.js');
 const { buildRunReport } = await import('../src/core/reporting/model.js');
+const { detectFlaky } = await import('../src/core/reporting/flaky.js');
+const { createContext, run } = await import('../src/core/pipeline.js');
+const { resolveConfig } = await import('../src/core/config.js');
 
 const j = (id: string): Journey => ({ id, name: `Journey ${id}`, goal: 'g', priority: 'high', tags: [], steps: ['a'], status: 'selected' });
 let dir: string;
@@ -45,6 +48,20 @@ describe('SPEC-012 ci integration', () => {
     const code = await main(['node', 'agentic-e2e', 'ci', 'https://example.com', '--retries', '1', '--reporter', 'json', '--notify-on', 'never', '--data-dir', dir]);
     expect(code).toBe(1);
     expect(calls.map((c) => [c.kind ?? 'run', c.ids.join(','), c.retries])).toEqual([['run', 'a,b', 0], ['retry', 'a', 0]]);
+  });
+
+  it('review: a stable browser-specific failure is not flaky (detection aggregates per journey and run)', () => {
+    const res = (project: string, status: TestResult['status']): TestResult => ({ journeyId: 'a', file: '', status, durationMs: 1, screenshots: [], project, browser: project });
+    const rec = (id: string, kind: RunRecord['kind'] = 'run'): RunRecord => ({ id, kind, startedAt: id, finishedAt: id, screenshots: 'off', fullPage: false, results: [res('chromium', 'passed'), res('firefox', 'failed')] });
+    const flaky = detectFlaky([rec('r1'), rec('r2'), rec('r3'), rec('r4', 'retry')], []);
+    expect(flaky.a?.flaky ?? false).toBe(false);
+  });
+
+  it('review: heal re-runs use 0 Playwright retries; normal runs use config.retries', async () => {
+    const ctx = createContext({ config: resolveConfig({ cli: { dataDir: dir, retries: 2 }, env: {} }) });
+    await run(ctx, 'https://example.com', { journeyIds: ['b'], kind: 'heal-rerun' });
+    await run(ctx, 'https://example.com', { journeyIds: ['b'] });
+    expect(calls.map((c) => [c.kind ?? 'run', c.retries])).toEqual([['heal-rerun', 0], ['run', 2]]);
   });
 
   it('report has one row per journey × project with attempts matched per project', () => {

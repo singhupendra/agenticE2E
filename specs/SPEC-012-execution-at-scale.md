@@ -40,7 +40,7 @@
 
 | ID | Requirement |
 |----|-------------|
-| FR-5 | Config `workers` (positive int or `"N%"`, default 2) and `retries` (int 0..10, default 0; the key is shared with SPEC-011); CLI `--workers`, `--retries`. For `run`/`heal`/`all`, `retries` is Playwright's in-run retries. `ci` (SPEC-011) keeps its own separate `retry` runs and runs Playwright with 0 retries, so attempts never multiply. Retry and heal re-runs are never sharded. |
+| FR-5 | Config `workers` (positive int or `"N%"`, default 2) and `retries` (int 0..10, default 0; the key is shared with SPEC-011); CLI `--workers`, `--retries`. For `run`/`heal`/`all`, `retries` is Playwright's in-run retries. `ci` (SPEC-011) keeps its own separate `retry` runs and runs Playwright with 0 retries, so attempts never multiply. Heal verification re-runs always use 0 Playwright retries (a candidate fix must pass on its own). Retry and heal re-runs are never sharded. |
 | FR-6 | Config/CLI `shard` = `"i/n"` (1 ≤ i ≤ n). The sorted list of test ids is split into n contiguous near-equal chunks and only chunk i runs (each on every target). Invalid values are errors; an empty shard runs nothing and is not an error (returns an empty run, not stored). |
 | FR-7 | With retries, the result is the last attempt; `retries` (attempts − 1) and `flaky: true` (passed after a failed attempt) are recorded per result. |
 
@@ -78,7 +78,7 @@
 |----|-------------|
 | FR-21 | Every `TestResult` records `project`, `browser`, `device?` and `env?`; `RunRecord` records `env?`, `baseUrl`, `targets`, `workers`, `retries`, `shard?`, and the filters used. One result per (journey, project). Screenshots / failure dumps are stored per project when more than one project runs. |
 | FR-22 | Healing heals each journey once (first failing result), and a re-run counts as passed only when every project of that journey passed. `runAll().final` has one entry per journey (failed if any project failed). |
-| FR-25 | SPEC-011 integration: `ci` tracks each journey × project; a journey is failing (retried, reported, exit 1) while any project fails. Reports (JUnit/JSON/HTML) have one row per journey × project, with attempts matched per project, `project`/`browser`/`device`/`env` on the row, and ` [project]` in the name when several targets ran. Flaky detection sees one aggregated result per journey and run. |
+| FR-25 | SPEC-011 integration: `ci` tracks each journey × project; a journey is failing (retried, reported, exit 1) while any project fails. Reports (JUnit/JSON/HTML) have one row per journey × project, with attempts matched per project, `project`/`browser`/`device`/`env` on the row, and ` [project]` in the name when several targets ran. Flaky detection (`detectFlaky`, used by reports, the CI summary and listings) sees one aggregated result per journey and run, so a stable browser-specific failure is not flaky. |
 | FR-23 | `listTestCases` reports per test `tags` and `targets` (latest outcome per env × project); `lastRun` aggregates the latest run containing the test (failed if any project failed). `list-test-cases --env <name>` and heal `--failed --env <name>` consider only runs of that env. |
 | FR-24 | Web clients cannot set `environments`: the key is ignored in job options (the UI round-trips `/api/config`); they pick one by name with `env`; `/api/config` returns environments as `{ baseUrl, readOnly, headers: <header names> }` without values. |
 

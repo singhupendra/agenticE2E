@@ -1,4 +1,5 @@
 import type { HealRecord, RunRecord, TestResult } from '../types.js';
+import { aggregateByJourney } from '../scale/results.js';
 
 /** SPEC-011 FR-14 */
 export type FlakyReason = 'passed_on_retry' | 'alternating';
@@ -13,7 +14,9 @@ const ALTERNATING_MIN_TRANSITIONS = 2;
  */
 export function detectFlaky(runs: RunRecord[], heals: HealRecord[], opts: { window?: number } = {}): Record<string, FlakyInfo> {
   const window = opts.window ?? 10;
-  const ordered = [...runs].sort((a, b) => a.id.localeCompare(b.id));
+  // SPEC-012: one aggregated result per journey and run (failed if any browser/device failed), so a stable
+  // browser-specific failure is never read as pass↔fail alternation.
+  const ordered = [...runs].sort((a, b) => a.id.localeCompare(b.id)).map((r) => ({ ...r, results: aggregateByJourney(r.results) }));
   const seq = new Map<string, { kind: RunRecord['kind']; status: TestResult['status']; at: string }[]>();
   for (const run of ordered) {
     for (const r of run.results) {
