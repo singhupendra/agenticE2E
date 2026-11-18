@@ -15,11 +15,12 @@ import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases, type LastRun } from '../core/test-cases.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
 import { addReportOptions, commanderExitCode, registerCiCommand, reportCliConfig, reportRun } from './ci.js';
+import { addJourneyTagOptions, addScaleOptions, applyJourneyTagOptions, scaleCliConfig } from './scale.js';
 
 const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
 
 function addCommon(cmd: Command): Command {
-  return cmd
+  return addScaleOptions(cmd)
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
     .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
     .option('--screenshots <mode>', 'off | on-failure | every-step | end-of-journey')
@@ -62,6 +63,7 @@ function cliConfig(o: Record<string, unknown>): PartialConfig {
     authUser: o.user as string | undefined,
     credentialsFile: o.credentials as string | undefined,
     ...reportCliConfig(o),
+    ...scaleCliConfig(o),
   };
 }
 
@@ -77,12 +79,13 @@ async function ctxFrom(o: Record<string, unknown>): Promise<Context> {
 
 function printJourneys(journeys: Journey[]) {
   for (const j of journeys) {
-    console.log(`  [${j.status.padEnd(8)}] ${j.id}  (${j.priority}${j.rank ? `, rank ${j.rank}` : ''})\n      ${j.name} — ${j.goal}`);
+    console.log(`  [${j.status.padEnd(8)}] ${j.id}  (${j.priority}${j.rank ? `, rank ${j.rank}` : ''})\n      ${j.name} — ${j.goal}${j.tags.length ? `\n      tags: ${j.tags.join(', ')}` : ''}`);
     j.steps.forEach((s, i) => console.log(`        ${i + 1}. ${s}`));
   }
 }
 function printRun(r: RunRecord) {
-  for (const t of r.results) console.log(`  ${t.status === 'passed' ? '✔' : '✗'} ${t.journeyId} [${t.status}] ${t.durationMs}ms${t.error ? `\n      ${t.error.split('\n')[0]}` : ''}`);
+  const multi = (r.targets?.length ?? 0) > 1 || !!r.env;
+  for (const t of r.results) console.log(`  ${t.status === 'passed' ? '✔' : '✗'} ${t.journeyId}${multi && t.project ? ` (${[t.project, t.env].filter(Boolean).join(' @ ')})` : ''} [${t.status}${t.flaky ? ', flaky' : ''}] ${t.durationMs}ms${t.error ? `\n      ${t.error.split('\n')[0]}` : ''}`);
 }
 
 function editJourneys(store: Store, site: string, journeys: Journey[]): Journey[] {
@@ -114,7 +117,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
       printJourneys(d.journeys);
     });
 
-  addCommon(program.command('journeys <url>').description('show, approve, reject or edit stored journeys'))
+  addJourneyTagOptions(addCommon(program.command('journeys <url>').description('show, approve, reject or edit stored journeys (incl. tags)')))
     .option('--approve <ids...>', 'approve journeys by id')
     .option('--reject <ids...>', 'reject journeys by id')
     .option('--approve-all', 'approve every non-rejected journey')
@@ -128,7 +131,9 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (o.approve) journeys = setStatus(journeys, o.approve, 'approved');
       if (o.reject) journeys = setStatus(journeys, o.reject, 'rejected');
       if (o.approveAll) journeys = journeys.map((j) => (j.status === 'rejected' ? j : { ...j, status: 'approved' as const }));
-      if (o.approve || o.reject || o.approveAll) store.saveJourneys(site, journeys);
+      const tagged = applyJourneyTagOptions(journeys, o); // SPEC-012
+      if (tagged) journeys = tagged;
+      if (o.approve || o.reject || o.approveAll || tagged) store.saveJourneys(site, journeys);
       if (o.edit) journeys = editJourneys(store, site, journeys);
       printJourneys(journeys);
     });
@@ -249,17 +254,21 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .option('--json', 'machine-readable output')
     .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
+    .option('--env <name>', 'latest outcome from runs of this environment only (SPEC-012)')
+    .option('--grep <pattern>', 'only tests whose id, name or a tag matches (substring or /regex/)')
+    .option('--tag <tags...>', 'only tests with any of these tags')
     .action(async (url: string, o) => {
       const site = normalizeSite(url);
       const config = await loadConfig({ configFile: o.config, cli: { dataDir: o.dataDir } });
-      const listing = listTestCases(new Store(config.dataDir), site.id);
+      const listing = listTestCases(new Store(config.dataDir), site.id, { env: o.env, grep: o.grep, tag: o.tag });
       if (!listing) throw new Error(`Unknown site ${site.id} in ${config.dataDir}. Run: agentic-e2e discover ${url}`);
       if (o.json) return console.log(JSON.stringify(listing, null, 2));
       if (!listing.tests.length) return console.log(`No generated tests for ${site.id} yet. Run: agentic-e2e generate ${url}`);
       const lastRun = (r: LastRun) => (r.outcome === 'never_run' ? 'never run' : `${r.outcome} ${r.at ?? ''}`.trim());
       const anyAuth = listing.tests.some((t) => t.requiresAuth); // the AUTH column only appears once a test needs a login
       const anyFlaky = listing.tests.some((t) => t.flaky); // SPEC-011: the FLAKY column only appears once a test is flaky
-      const rows = [['JOURNEY', 'NAME', 'STATUS', ...(anyAuth ? ['AUTH'] : []), 'LAST RUN', ...(anyFlaky ? ['FLAKY'] : []), 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, ...(anyAuth ? [t.requiresAuth ? t.user ?? 'yes' : '-'] : []), lastRun(t.lastRun), ...(anyFlaky ? [t.flaky ? t.flaky.reasons.join('+') : '-'] : []), t.specFile])];
+      const anyTags = listing.tests.some((t) => t.tags?.length); // SPEC-012
+      const rows = [['JOURNEY', 'NAME', 'STATUS', ...(anyTags ? ['TAGS'] : []), ...(anyAuth ? ['AUTH'] : []), 'LAST RUN', ...(anyFlaky ? ['FLAKY'] : []), 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, ...(anyTags ? [t.tags?.join(',') || '-'] : []), ...(anyAuth ? [t.requiresAuth ? t.user ?? 'yes' : '-'] : []), lastRun(t.lastRun), ...(anyFlaky ? [t.flaky ? t.flaky.reasons.join('+') : '-'] : []), t.specFile])];
       const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
       console.log(`${site.id}: ${listing.tests.length} test${listing.tests.length === 1 ? '' : 's'}`);
       for (const r of rows) console.log(r.map((cell, c) => (c === r.length - 1 ? cell : cell.padEnd(widths[c]))).join('  '));

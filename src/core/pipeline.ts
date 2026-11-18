@@ -14,6 +14,11 @@ import { proposeJourneys, selectJourneys } from './planner.js';
 import { runTests } from './runner.js';
 import { Store, normalizeSite } from './storage.js';
 import type { HealRecord, Journey, PageModel, ProgressFn, RunRecord } from './types.js';
+import { environmentSecrets, resolveEnvironment, type ResolvedEnvironment } from './scale/environments.js';
+import { aggregateByJourney, failuresToHeal } from './scale/results.js';
+import { applyShard, parseShard } from './scale/shard.js';
+import { filterJourneyIds, hasFilter, isDestructiveJourney } from './scale/tags.js';
+import { resolveTargets } from './scale/targets.js';
 
 export interface Context {
   config: Config;
@@ -25,6 +30,8 @@ export interface Context {
   /** knows every credential value of the loaded file; everything persisted/streamed/prompted passes through it */
   redactor: Redactor;
   redact: (s: string) => string;
+  /** SPEC-012: the selected environment (`--env`), or null. Its header values are in `redactor`. */
+  environment: ResolvedEnvironment | null;
 }
 
 export function createContext(opts: { config: Config; llm?: LLMProvider; onProgress?: ProgressFn; cwd?: string }): Context {
@@ -37,7 +44,11 @@ export function createContext(opts: { config: Config; llm?: LLMProvider; onProgr
       onWarn: (message) => raw({ type: 'warn', stage: 'auth', message }),
     })
     : CredentialStore.empty();
-  const redactor = new Redactor(credentials.secretEntries());
+  // SPEC-012: fail on bad targets / shard / env before anything expensive; env header values are secrets.
+  resolveTargets(config);
+  if (config.shard) parseShard(config.shard);
+  const environment = resolveEnvironment(config);
+  const redactor = new Redactor([...credentials.secretEntries(), ...environmentSecrets(environment)]);
   let llm: LLMProvider | undefined;
   return {
     config,
@@ -53,6 +64,7 @@ export function createContext(opts: { config: Config; llm?: LLMProvider; onProgr
     credentials,
     redactor,
     redact: (s) => redactor.redact(s),
+    environment,
   };
 }
 
@@ -122,12 +134,31 @@ export async function generate(ctx: Context, url: string, opts: { regenerate?: b
   return { site: d.site, journeys: d.journeys, result, reusedJourneys: d.reused };
 }
 
-export async function run(ctx: Context, url: string, opts: { journeyIds?: string[]; kind?: RunRecord['kind'] } = {}): Promise<RunRecord> {
+/** `playwrightRetries` overrides `config.retries` for this run (SPEC-011 `ci` retries with separate runs, so it passes 0). */
+export async function run(ctx: Context, url: string, opts: { journeyIds?: string[]; kind?: RunRecord['kind']; playwrightRetries?: number } = {}): Promise<RunRecord> {
   const meta = normalizeSite(url);
-  const user = authUser(ctx, url);
-  const { store } = ctx;
+  const { store, config } = ctx;
+  const env = ctx.environment;
+  // SPEC-012 FR-9/13: the stored journeys of <url> run against the env's base URL; the login is for the env's host.
+  const targetUrl = env?.baseUrl ?? url;
+  const user = authUser(ctx, targetUrl);
   let ids = opts.journeyIds ?? store.listTests(meta.id);
-  const journeys = new Map((store.loadJourneys(meta.id) ?? []).map((j) => [j.id, j]));
+  const stored = store.loadJourneys(meta.id) ?? [];
+  const journeys = new Map(stored.map((j) => [j.id, j]));
+  const filters = { ...(config.grep ? { grep: config.grep } : {}), ...(config.tag?.length ? { tag: config.tag } : {}) };
+  if (hasFilter(filters)) {
+    const before = ids.length;
+    ids = filterJourneyIds(ids, stored, filters);
+    if (before && !ids.length) throw new Error(`No tests match the filter (${[filters.grep && `--grep ${filters.grep}`, filters.tag && `--tag ${filters.tag.join(' ')}`].filter(Boolean).join(', ')}) for site ${meta.id}`);
+  }
+  if (env?.readOnly) {
+    const destructive = ids.filter((id) => journeys.has(id) && isDestructiveJourney(journeys.get(id)!));
+    for (const id of destructive) ctx.onProgress({ type: 'warn', stage: 'run', message: `Skipping "${id}": environment "${env.name}" is read-only and the journey looks destructive (tag it "read-only" to allow it)` });
+    ids = ids.filter((id) => !destructive.includes(id));
+    if (destructive.length && !ids.length) throw new Error(`No runnable tests for site ${meta.id}: every selected journey is destructive and environment "${env.name}" is read-only`);
+  }
+  // Only primary runs are sharded; retry / heal re-runs target ids that are already in this shard.
+  const shard = config.shard && (opts.kind ?? 'run') === 'run' ? parseShard(config.shard) : undefined;
   const needsAuth = (id: string) => !!journeys.get(id)?.requiresAuth;
   if (!user) {
     for (const id of ids.filter(needsAuth)) ctx.onProgress({ type: 'warn', stage: 'run', message: `Skipping "${id}": it requires a logged-in user (enable logged-in mode with --auth)` });
@@ -138,22 +169,37 @@ export async function run(ctx: Context, url: string, opts: { journeyIds?: string
     for (const id of ids.filter((x) => needsAuth(x) && journeys.get(x)!.user && journeys.get(x)!.user !== user.name)) ctx.onProgress({ type: 'info', stage: 'run', message: `Skipping "${id}": it belongs to user "${journeys.get(id)!.user}" (this run is "${user.name}"; run again with --user)` });
     ids = ids.filter((id) => !(needsAuth(id) && journeys.get(id)!.user && journeys.get(id)!.user !== user.name));
   }
+  if (shard) {
+    const all = ids.length;
+    ids = applyShard(ids, shard);
+    ctx.onProgress({ type: 'info', stage: 'run', message: `Shard ${shard.current}/${shard.total}: ${ids.length} of ${all} test(s)` });
+    if (!ids.length) {
+      const now = new Date().toISOString();
+      return { id: '', kind: opts.kind ?? 'run', startedAt: now, finishedAt: now, screenshots: config.screenshots, fullPage: config.fullPage, results: [], shard, ...(env ? { env: env.name } : {}) };
+    }
+  }
   const authIds = user ? ids.filter(needsAuth) : [];
+  const journeyTimeouts = Object.fromEntries(ids.flatMap((id) => (journeys.get(id)?.timeoutMs ? [[id, journeys.get(id)!.timeoutMs!]] : [])));
   const exec = async (storageState?: string) => {
     stage(ctx, 'run', 'Running tests');
     return runTests(store, {
-      site: meta.id, baseUrl: meta.origin, journeyIds: ids, screenshots: ctx.config.screenshots, fullPage: ctx.config.fullPage,
-      headless: ctx.config.headless, testTimeoutMs: ctx.config.testTimeoutMs, kind: opts.kind, onProgress: ctx.onProgress,
+      site: meta.id, baseUrl: env?.baseUrl ?? meta.origin, journeyIds: ids, screenshots: config.screenshots, fullPage: config.fullPage,
+      headless: config.headless, testTimeoutMs: config.testTimeoutMs, kind: opts.kind, onProgress: ctx.onProgress,
+      targets: resolveTargets(config), // Heal verification re-runs never retry: a candidate fix must pass on its own (and ci attempts never multiply).
+      workers: config.workers, retries: opts.playwrightRetries ?? (opts.kind === 'heal-rerun' ? 0 : config.retries), globalTimeoutMs: config.globalTimeoutMs || undefined,
+      journeyTimeouts, trace: config.trace, video: config.video,
+      ...(env ? { env: { name: env.name, baseUrl: env.baseUrl, headers: env.headers } } : {}),
+      meta: { ...(shard ? { shard } : {}), ...(hasFilter(filters) ? { filters } : {}) },
       ...(user && storageState ? { auth: { storageState, journeyIds: authIds, env: { E2E_USERNAME: user.username, E2E_PASSWORD: user.password } } } : {}),
     });
   };
   if (!user || !authIds.length) return exec();
-  const session = await ensureSession(ctx, url, { user: user.name });
+  const session = await ensureSession(ctx, targetUrl, { user: user.name });
   const first = await exec(session.storageState);
   const failedAuth = first.results.some((r) => authIds.includes(r.journeyId) && r.status !== 'passed');
-  if (session.reused && failedAuth && !(await isSessionValid(ctx, url, user.name))) {
+  if (session.reused && failedAuth && !(await isSessionValid(ctx, targetUrl, user.name))) {
     ctx.onProgress({ type: 'info', stage: 'auth', message: 'Stored session expired during the run; logging in again and re-running once' });
-    const fresh = await ensureSession(ctx, url, { user: user.name, force: true });
+    const fresh = await ensureSession(ctx, targetUrl, { user: user.name, force: true });
     return exec(fresh.storageState);
   }
   return first;
@@ -161,14 +207,15 @@ export async function run(ctx: Context, url: string, opts: { journeyIds?: string
 
 export async function heal(ctx: Context, url: string, failedRun: RunRecord): Promise<HealRecord[]> {
   const meta = normalizeSite(url);
-  const failures = failedRun.results.filter((r) => r.status === 'failed' || r.status === 'timedOut');
+  // SPEC-012 FR-22: heal each journey once; a re-run passes only when every project of the journey passed.
+  const failures = failuresToHeal(failedRun.results);
   const records: HealRecord[] = [];
   if (!failures.length) return records;
   stage(ctx, 'heal', `Healing ${failures.length} failing test(s) (up to ${ctx.config.healAttempts} attempts each)`);
   for (const f of failures) {
     records.push(await healTest(ctx.store, ctx.getLLM(), {
-      site: meta.id, baseUrl: meta.origin, journeyId: f.journeyId, failure: f, attempts: ctx.config.healAttempts,
-      runner: (ids) => run(ctx, url, { journeyIds: ids, kind: 'heal-rerun' }), onProgress: ctx.onProgress, redactor: ctx.redactor,
+      site: meta.id, baseUrl: ctx.environment?.baseUrl ?? meta.origin, journeyId: f.journeyId, failure: f, attempts: ctx.config.healAttempts,
+      runner: async (ids) => { const r = await run(ctx, url, { journeyIds: ids, kind: 'heal-rerun' }); return { ...r, results: aggregateByJourney(r.results) }; }, onProgress: ctx.onProgress, redactor: ctx.redactor,
     }));
   }
   return records;
@@ -184,7 +231,7 @@ export async function runAll(ctx: Context, url: string, opts: { rediscover?: boo
   const first = await run(ctx, url);
   const heals = ctx.config.healAttempts > 0 ? await heal(ctx, url, first) : [];
   const healedIds = new Set(heals.filter((h) => h.outcome === 'healed').map((h) => h.journeyId));
-  const final = first.results.map((r) => {
+  const final = aggregateByJourney(first.results).map((r) => {
     const h = heals.find((x) => x.journeyId === r.journeyId);
     const status = healedIds.has(r.journeyId) ? 'passed' : h?.outcome === 'flaky_or_environment' ? 'passed' : r.status;
     return { journeyId: r.journeyId, status, healed: healedIds.has(r.journeyId) };
@@ -209,17 +256,17 @@ export interface HealSelectedResult {
 /** Select (and validate) tests, re-run only those, and heal only the ones that still fail. Passing ones never reach the LLM. */
 export async function healSelected(ctx: Context, url: string, selection: HealSelectionRequest = {}): Promise<HealSelectedResult> {
   const meta = normalizeSite(url);
-  authUser(ctx, url);
-  const sel = resolveHealSelection(ctx.store, meta.id, selection);
+  authUser(ctx, ctx.environment?.baseUrl ?? url);
+  const sel = resolveHealSelection(ctx.store, meta.id, { ...selection, ...(ctx.environment && selection.env === undefined ? { env: ctx.environment.name } : {}) });
   if (sel.ids && !sel.ids.length) {
     ctx.onProgress({ type: 'info', stage: 'heal', message: `No failing tests to heal for ${meta.id}` });
     return { selected: [], noneFailing: true, run: null, results: [], heals: [] };
   }
   const r = await run(ctx, url, { journeyIds: sel.ids ?? undefined });
   const heals = await heal(ctx, url, r);
-  const results = r.results.map(({ journeyId, status }): { journeyId: string; outcome: HealTestOutcome } => {
+  const results = aggregateByJourney(r.results).map(({ journeyId, status }): { journeyId: string; outcome: HealTestOutcome } => {
     const h = heals.find((x) => x.journeyId === journeyId);
     return { journeyId, outcome: h ? h.outcome : status === 'passed' ? 'already_passing' : 'skipped' };
   });
-  return { selected: r.results.map((x) => x.journeyId), noneFailing: false, run: r, results, heals };
+  return { selected: results.map((x) => x.journeyId), noneFailing: false, run: r, results, heals };
 }

@@ -21,7 +21,8 @@ export interface Job {
 }
 
 /** Options a web client may override per job. dataDir/model-provider internals are deliberately excluded. */
-const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true }).partial()
+// SPEC-012: `environments` (header values may be secrets) is server-only; clients pick one by name with `env`.
+const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true, environments: true }).partial()
   .extend({ awsProfile: configSchema.shape.awsProfile.unwrap().nullable().optional() }).strict();
 
 /** Effective config for a job: server config overlaid with the client's options. */
@@ -38,7 +39,10 @@ export function parseJobRequest(body: unknown): JobRequest {
   if (!ACTIONS.includes(b.action as Action)) throw new Error(`action must be one of ${ACTIONS.join(', ')}`);
   if (typeof b.url !== 'string') throw new Error('url is required');
   normalizeSite(b.url);
-  const opts = optionsSchema.safeParse(b.options ?? {});
+  // SPEC-012: `environments` is server-only. The UI round-trips /api/config (which shows env header *names*) as options,
+  // so it is dropped, never applied.
+  const { environments: _serverOnly, ...clientOptions } = (b.options ?? {}) as Record<string, unknown>;
+  const opts = optionsSchema.safeParse(clientOptions);
   if (!opts.success) throw new Error('Invalid options: ' + opts.error.issues.map((i) => `${i.path.join('.') || 'options'}: ${i.message}`).join('; '));
   const ids = b.journeyIds;
   if (ids !== undefined && !(Array.isArray(ids) && ids.every((x) => typeof x === 'string'))) throw new Error('journeyIds must be a string array');
@@ -46,7 +50,7 @@ export function parseJobRequest(body: unknown): JobRequest {
   if (b.failedOnly !== undefined && b.action !== 'heal') throw new Error('failedOnly only applies to action "heal"');
   // zod fills in schema defaults for absent keys; keep only what the client sent, or an omitted `provider`/`model`/... would
   // silently reset the server's own configuration.
-  const sent = (b.options ?? {}) as Record<string, unknown>;
+  const sent = clientOptions;
   const options = Object.fromEntries(Object.entries(opts.data).filter(([k]) => k in sent)) as JobOptions;
   return { action: b.action as Action, url: b.url, options, journeyIds: ids as string[] | undefined, ...(b.failedOnly === undefined ? {} : { failedOnly: b.failedOnly }), rediscover: b.rediscover === true, regenerate: b.regenerate === true };
 }
@@ -81,10 +85,22 @@ export class JobManager {
       const credentials = loadCredentials({ file: config.credentialsFile ?? path.resolve(DEFAULT_CREDENTIALS_FILE), explicit: !!config.credentialsFile });
       authUserFor({ config, credentials }, req.url);
     }
-    const job: Job = { id: randomUUID(), action: req.action, url: req.url, site, status: 'running', startedAt: new Date().toISOString(), events: [] };
+    // SPEC-012: createContext validates targets, shard and the env (incl. ${VAR} headers). Build it before the job is
+    // registered so a bad option is a 400 and never leaves a job stuck in `running` (which would 409 the site forever).
+    let job: Job | undefined;
+    const early: ProgressEvent[] = [];
+    let ctx: ReturnType<typeof createContext>;
+    try {
+      ctx = createContext({ config, llm: this.llm, onProgress: (e) => (job ? this.emit(job, e) : early.push(e)) });
+    } catch (e) {
+      throw (e as { statusCode?: number }).statusCode ? e : Object.assign(e as Error, { statusCode: 400 });
+    }
+    job = { id: randomUUID(), action: req.action, url: req.url, site, status: 'running', startedAt: new Date().toISOString(), events: [] };
     this.jobs.set(job.id, job);
-    const ctx = createContext({ config, llm: this.llm, onProgress: (e) => this.emit(job, e) });
+    for (const e of early) this.emit(job, e);
+    const j = job;
     void (async () => {
+      const job = j;
       try {
         switch (req.action) {
           case 'discover': { const d = await discover(ctx, req.url, { rediscover: req.rediscover }); job.result = { journeys: d.journeys.length, reused: d.reused }; break; }
@@ -104,6 +120,6 @@ export class JobManager {
         this.emit(job, { type: 'error', message: job.error });
       }
     })();
-    return job;
+    return j;
   }
 }

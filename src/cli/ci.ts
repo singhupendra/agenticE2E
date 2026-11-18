@@ -1,4 +1,4 @@
-import { Command, InvalidArgumentError } from 'commander';
+import { Command } from 'commander';
 import { loadConfig, type Config, type PartialConfig } from '../core/config.js';
 import { EXIT_CODES, runCi } from '../core/ci/run-ci.js';
 import { buildSiteReport, parseReporterList, publishError, publishReport, type ReportMode } from '../core/reporting/index.js';
@@ -26,7 +26,6 @@ export async function reportRun(ctx: Context, url: string, o: { mode: ReportMode
   await publishReport(ctx, buildSiteReport(ctx, url, o), { exitCode: o.exitCode });
 }
 
-const intArg = (v: string) => { const n = Number(v); if (!Number.isInteger(n) || n < 0) throw new InvalidArgumentError('must be a non-negative integer'); return n; };
 
 /** `ci` errors raised by commander itself (unknown flag, bad value) are config errors (exit 2). */
 export function commanderExitCode(argv: string[], err: { code?: string; exitCode?: number }): number {
@@ -43,7 +42,6 @@ export function registerCiCommand(program: Command, h: {
 }) {
   addReportOptions(h.addCommon(program.command('ci <url>')
     .description('non-interactive CI run of stored tests; exit 0 pass, 1 test failures, 2 config/auth error, 3 LLM/infra error')))
-    .option('--retries <n>', 're-run failing tests up to n times without the LLM (passing on retry = flaky)', intArg)
     .option('--allow-heal', 'heal tests that still fail (calls the LLM and may rewrite specs); off by default in CI')
     .action(async (url: string, o) => {
       let config: Config;

@@ -18,8 +18,12 @@ const MODE = process.env.AGENTIC_E2E_SCREENSHOTS ?? 'on-failure';
 const FULL_PAGE = process.env.AGENTIC_E2E_FULL_PAGE === 'true';
 const SHOT_DIR = process.env.AGENTIC_E2E_SHOT_DIR ?? '';
 const FAILURE_DIR = process.env.AGENTIC_E2E_FAILURE_DIR ?? '';
+// SPEC-012: one sub-directory per Playwright project when several browsers/devices run; per-journey timeouts.
+const PER_PROJECT = process.env.AGENTIC_E2E_PER_PROJECT === '1';
+const TIMEOUTS: Record<string, number> = (() => { try { return JSON.parse(process.env.AGENTIC_E2E_TIMEOUTS || '{}'); } catch { return {}; } })();
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'x';
+const key = (journey: string, project: string) => (PER_PROJECT ? path.join(slug(project), journey) : journey);
 
 async function shot(page: Page, journey: string, name: string): Promise<string | undefined> {
   if (!SHOT_DIR) return undefined;
@@ -45,7 +49,7 @@ export const test = base.extend<{
     await use({ username: process.env.E2E_USERNAME ?? '', password: process.env.E2E_PASSWORD ?? '' });
   },
   step: async ({ page }, use, testInfo) => {
-    const journey = path.basename(testInfo.file).replace(/\\.spec\\.[tj]s$/, '');
+    const journey = key(path.basename(testInfo.file).replace(/\\.spec\\.[tj]s$/, ''), testInfo.project.name);
     let n = 0;
     await use(async (name, body) => {
       const result = await base.step(name, body);
@@ -55,14 +59,16 @@ export const test = base.extend<{
   },
   _agentic: [
     async ({ page }, use, testInfo) => {
+      const id = path.basename(testInfo.file).replace(/\\.spec\\.[tj]s$/, '');
+      if (typeof TIMEOUTS[id] === 'number' && TIMEOUTS[id] > 0) testInfo.setTimeout(TIMEOUTS[id]);
       await use();
-      const journey = path.basename(testInfo.file).replace(/\\.spec\\.[tj]s$/, '');
+      const journey = key(id, testInfo.project.name);
       const failed = testInfo.status !== testInfo.expectedStatus;
       if (failed) {
         const screenshot = MODE !== 'off' ? await shot(page, journey, 'failure') : undefined;
         if (FAILURE_DIR) {
           try {
-            fs.mkdirSync(FAILURE_DIR, { recursive: true });
+            fs.mkdirSync(path.dirname(path.join(FAILURE_DIR, journey)), { recursive: true });
             let ariaSnapshot = '';
             let html = '';
             try { ariaSnapshot = await page.locator('body').ariaSnapshot({ timeout: 3000 }); } catch {}

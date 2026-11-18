@@ -2,6 +2,8 @@ import path from 'node:path';
 import { detectFlaky, type FlakyInfo } from './reporting/flaky.js';
 import type { Store } from './storage.js';
 import type { Journey, JourneyStatus, SiteMeta, TestResult } from './types.js';
+import { aggregateByJourney } from './scale/results.js';
+import { filterJourneyIds, type JourneyFilter } from './scale/tags.js';
 
 export type LastRunOutcome = 'passed' | 'failed' | 'skipped' | 'healed' | 'never_run';
 
@@ -26,6 +28,16 @@ export interface TestCase {
   user?: string;
   /** SPEC-011: present only when the run history marks the test flaky */
   flaky?: FlakyInfo;
+  /** SPEC-012: journey tags (only when non-empty) */
+  tags?: string[];
+  /** SPEC-012: latest outcome per environment × project (only when runs recorded projects) */
+  targets?: TargetOutcome[];
+}
+
+export interface TargetOutcome { env?: string; project: string; browser?: string; device?: string; outcome: LastRunOutcome; runId: string; at: string }
+export interface ListTestCasesOptions extends JourneyFilter {
+  /** only runs of this environment count for `lastRun` / `targets` */
+  env?: string;
 }
 
 export interface SiteTestCases {
@@ -37,19 +49,33 @@ export interface SiteTestCases {
 const outcomeOf = (s: TestResult['status']): LastRunOutcome => (s === 'passed' ? 'passed' : s === 'skipped' ? 'skipped' : 'failed');
 
 /** Stored generated tests of a site with journey info and latest run outcome. `null` = unknown site. Read-only. */
-export function listTestCases(store: Store, siteId: string): SiteTestCases | null {
+export function listTestCases(store: Store, siteId: string, opts: ListTestCasesOptions = {}): SiteTestCases | null {
   if (!store.hasSite(siteId)) return null;
   const meta = store.loadSite(siteId);
   const journeys = new Map<string, Journey>((store.loadJourneys(siteId) ?? []).map((j) => [j.id, j]));
   const heals = store.loadHeals(siteId);
 
   // Latest stored result per journey; runs are ordered by id (= start time).
-  const latest = new Map<string, { result: TestResult; run: ReturnType<Store['listRuns']>[number] }>();
-  const runs = store.listRuns(siteId);
+  // SPEC-012: one run may hold several results per journey (one per project): aggregate them (failed if any failed).
+  type Run = ReturnType<Store['listRuns']>[number];
+  const latest = new Map<string, { result: TestResult; run: Run }>();
+  const targets = new Map<string, Map<string, TargetOutcome>>();
+  // SPEC-011 flaky detection sees one (aggregated) result per journey and run, and only the selected env's runs.
+  const runs = store.listRuns(siteId).filter((run) => !opts.env || run.env === opts.env);
   const flaky = detectFlaky(runs, heals);
-  for (const run of runs) for (const result of run.results) latest.set(result.journeyId, { result, run });
+  for (const run of runs) {
+    for (const result of aggregateByJourney(run.results)) latest.set(result.journeyId, { result, run });
+    for (const r of run.results) {
+      if (!r.project) continue;
+      const per = targets.get(r.journeyId) ?? new Map<string, TargetOutcome>();
+      per.set(`${run.env ?? ''}\u0000${r.project}`, { ...(run.env ? { env: run.env } : {}), project: r.project, ...(r.browser ? { browser: r.browser } : {}), ...(r.device ? { device: r.device } : {}), outcome: outcomeOf(r.status), runId: run.id, at: run.finishedAt });
+      targets.set(r.journeyId, per);
+    }
+  }
 
-  const tests = store.listTests(siteId).map((journeyId): TestCase => {
+  const allIds = store.listTests(siteId);
+  const ids = filterJourneyIds(allIds, [...journeys.values()], opts);
+  const tests = ids.map((journeyId): TestCase => {
     const j = journeys.get(journeyId);
     const l = latest.get(journeyId);
     let lastRun: LastRun = { outcome: 'never_run' };
@@ -72,6 +98,8 @@ export function listTestCases(store: Store, siteId: string): SiteTestCases | nul
       lastRun,
       ...(j?.requiresAuth ? { requiresAuth: true, ...(j.user ? { user: j.user } : {}) } : {}),
       ...(flaky[journeyId]?.flaky ? { flaky: flaky[journeyId] } : {}),
+      ...(j?.tags?.length ? { tags: j.tags } : {}),
+      ...(targets.get(journeyId)?.size ? { targets: [...targets.get(journeyId)!.values()] } : {}),
     };
   });
 

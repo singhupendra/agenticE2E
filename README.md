@@ -255,6 +255,46 @@ agentic-e2e all https://shop.example.com --auth --rediscover [--user admin]
 
 Limits: storageState files contain live session cookies (protect `data/` like the credentials file); a page that echoes a password into the DOM is caught by redaction in artifacts, not prevented; values shorter than 3 characters are not redacted; no 2FA/CAPTCHA/SSO flows, no sign-up; one user per run.
 
+## Execution at scale (SPEC-012)
+
+```bash
+# cross-browser + device emulation (Playwright presets); one result per journey × target
+agentic-e2e run https://shop.example --browser chromium firefox webkit --device 'iPhone 15' 'Pixel 7'
+# parallelism, retries (run/heal/all: Playwright retries; `ci` re-runs failures as separate retry runs), CI sharding (journey-level, deterministic: shard i of n of the sorted test ids)
+agentic-e2e run https://shop.example --workers 4 --retries 2 --shard 1/4
+# same stored journeys, another environment (base URL + headers from the config); prod is read-only
+agentic-e2e run https://shop.example --env staging
+# suites / filters (also on heal and list-test-cases)
+agentic-e2e run https://shop.example --tag smoke critical
+agentic-e2e heal https://shop.example --failed --env staging --grep checkout
+agentic-e2e list-test-cases https://shop.example --env prod --tag critical
+# edit tags with the journeys command or the web journeys tab (the planner assigns smoke/regression/critical by priority, and destructive)
+agentic-e2e journeys https://shop.example --add-tags checkout=critical --remove-tags checkout=regression
+agentic-e2e journeys https://shop.example --set-tags '*=regression' home=smoke,critical
+# timeouts and artifacts
+agentic-e2e run https://shop.example --timeout 30000 --global-timeout 600000 --trace on-failure --video retain-on-failure
+```
+
+```ts
+// agentic-e2e.config.ts
+export default {
+  browsers: ['chromium', 'firefox'], devices: ['iPhone 15'],
+  workers: '50%', retries: 1, globalTimeoutMs: 15 * 60_000,
+  trace: 'on-failure', video: 'off',             // off | on | on-failure | retain-on-failure
+  environments: {
+    dev: { baseUrl: 'http://localhost:3000' },
+    staging: { baseUrl: 'https://staging.shop.example', headers: { authorization: 'Bearer ${STAGING_TOKEN}' } },
+    prod: { baseUrl: 'https://shop.example' },    // readOnly defaults to true for prod/production
+  },
+};
+```
+
+- `--env` (or `AGENTIC_E2E_ENV`) keeps the site's stored journeys/tests (from `<url>`) and only swaps the base URL and headers. In a read-only env, journeys tagged `destructive` (or that look destructive: delete, checkout, pay, log out, …) are skipped with a warning; tag a journey `read-only` to allow it. In `--auth` mode the login uses the credentials of the env's host.
+- Header values may use `${VAR}`; they are secrets: passed to the test process via an env var (never written into `playwright.config.mjs`), scrubbed from `report.json`/`output.log`/failure dumps, redacted from progress and stored data, and `/api/config` shows header *names* only. Tracing is forced off while env headers are sent (traces record request headers), and trace/video are always off for logged-in runs.
+- Per-journey timeout: set `"timeoutMs"` on a journey in `journeys.json` (`journeys --edit`).
+- Results record `project`, `browser`, `device`, `env`, `retries`, `flaky` and `videoPath`; runs record `env`, `baseUrl`, `targets`, `workers`, `retries`, `shard` and filters. `list-test-cases` shows the latest outcome (failed if any target failed) and, in `--json`, the latest outcome per env × target.
+- Firefox/WebKit must be installed: `npx playwright install firefox webkit`.
+
 ## Web UI
 
 ```bash

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { PROVIDERS } from './llm/models.js';
 import { REPORT_FORMATS } from './reporting/model.js';
 import { NOTIFY_ON } from './reporting/notify.js';
+import { scaleConfigShape } from './scale/options.js';
 
 export const SCREENSHOT_MODES = ['off', 'on-failure', 'every-step', 'end-of-journey'] as const;
 
@@ -43,6 +44,8 @@ export const configSchema = z.object({
   retries: z.number().int().min(0).max(10).default(0),
   /** SPEC-011: when to send webhook/Slack notifications (URLs come from env only). */
   notifyOn: z.enum(NOTIFY_ON).default('always'),
+  /** SPEC-012: browsers/devices, workers/retries/shard, environments, grep/tag filters, global timeout, trace/video. */
+  ...scaleConfigShape,
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -58,6 +61,7 @@ const ENV_MAP: Record<string, { key: keyof Config; parse: (v: string) => unknown
   AGENTIC_E2E_DATA_DIR: { key: 'dataDir', parse: String },
   AGENTIC_E2E_CREDENTIALS: { key: 'credentialsFile', parse: String },
   AGENTIC_E2E_REPORT_DIR: { key: 'reportDir', parse: String },
+  AGENTIC_E2E_ENV: { key: 'env', parse: String },
 };
 
 function stripUndefined<T extends object>(o: T | undefined): Partial<T> {

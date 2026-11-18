@@ -1,18 +1,21 @@
 import { z } from 'zod';
 import type { Journey } from './types.js';
+import { normalizeTags } from './scale/tags.js';
 
 export const journeySchema = z.object({
   id: z.string().regex(/^[a-z0-9][a-z0-9_-]*$/, 'id must be lowercase letters, digits, - or _'),
   name: z.string().min(1),
   goal: z.string().min(1),
   priority: z.enum(['high', 'medium', 'low']),
-  tags: z.array(z.string()).default([]),
+  // SPEC-012: lower-cased, de-duplicated, invalid dropped (web journeys tab / --edit)
+  tags: z.array(z.string()).default([]).transform((t) => normalizeTags(t)),
   steps: z.array(z.string().min(1)).min(1),
   status: z.enum(['proposed', 'selected', 'approved', 'rejected']),
   rank: z.number().optional(),
   rationale: z.string().optional(),
   requiresAuth: z.boolean().optional(),
   user: z.string().optional(),
+  timeoutMs: z.number().int().positive().optional(),
 });
 
 /** Validate user-edited journeys (CLI --edit, REST PUT). */

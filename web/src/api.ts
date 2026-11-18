@@ -16,7 +16,7 @@ export interface SiteDetail {
   tests: { id: string; versions: string[] }[]; runs: RunSummary[]; heals: HealRecord[];
 }
 export type LastRunOutcome = 'passed' | 'failed' | 'skipped' | 'healed' | 'never_run';
-export interface TestCaseRow { journeyId: string; name: string; journeyStatus: string; requiresAuth?: boolean; user?: string; lastRun: { outcome: LastRunOutcome; at?: string; error?: string } }
+export interface TestCaseRow { journeyId: string; name: string; journeyStatus: string; requiresAuth?: boolean; user?: string; tags?: string[]; lastRun: { outcome: LastRunOutcome; at?: string; error?: string } }
 export interface HealJobPayload { journeyIds?: string[]; failedOnly?: boolean }
 export interface TestDetail { id: string; code: string; versions: { name: string; code: string }[] }
 export interface RunDetail { id: string; results: { journeyId: string; status: string; durationMs: number; error?: string; screenshots: string[]; tracePath?: string; failure?: { url: string; screenshot?: string } }[] }

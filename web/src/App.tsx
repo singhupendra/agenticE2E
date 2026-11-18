@@ -239,6 +239,9 @@ function Journeys({ site, journeys, onSaved }: { site: string; journeys: Journey
           </div>
           {j.requiresAuth && <small><span className="badge">auth{j.user ? `: ${j.user}` : ''}</span></small>}
           <input value={j.goal} onChange={(e) => upd(i, { goal: e.target.value })} aria-label={`goal ${j.id}`} />
+          {/* SPEC-012: suites (smoke, regression, critical), destructive, read-only, ... — comma-separated, applied on blur */}
+          <input key={`${j.id}:${j.tags.join(',')}`} defaultValue={j.tags.join(', ')} placeholder="tags: smoke, regression, critical, destructive"
+            onBlur={(e) => upd(i, { tags: e.target.value.split(',').map((t) => t.trim().toLowerCase()).filter(Boolean) })} aria-label={`tags ${j.id}`} />
           <textarea rows={Math.max(3, j.steps.length + 1)} value={j.steps.join('\n')} onChange={(e) => upd(i, { steps: e.target.value.split('\n').filter((l) => l.trim()) })} aria-label={`steps ${j.id}`} />
           {j.rationale && <small className="muted">LLM rank {j.rank}: {j.rationale}</small>}
         </div>
@@ -272,7 +275,7 @@ function Tests({ site, busy, version, onHeal }: { site: string; busy: boolean; v
       {rows.map((t) => (
         <label key={t.journeyId} className={`result test-${t.lastRun.outcome}`}>
           <input type="checkbox" checked={picked.has(t.journeyId)} onChange={() => toggle(t.journeyId)} aria-label={`select ${t.journeyId}`} />{' '}
-          <b>{t.journeyId}</b> <small>{t.name}</small> {t.requiresAuth && <span className="badge">auth{t.user ? `: ${t.user}` : ''}</span>} <span className="badge">{t.lastRun.outcome.replace('_', ' ')}</span>
+          <b>{t.journeyId}</b> <small>{t.name}</small> {t.requiresAuth && <span className="badge">auth{t.user ? `: ${t.user}` : ''}</span>} {t.tags?.map((tag) => <span className="badge" key={tag}>#{tag}</span>)} <span className="badge">{t.lastRun.outcome.replace('_', ' ')}</span>
           {t.lastRun.error && <small className="muted"> {t.lastRun.error}</small>}
         </label>
       ))}
