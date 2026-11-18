@@ -61,7 +61,7 @@ export async function runCi(o: CiOptions): Promise<CiResult> {
   const progress = o.onProgress ?? (() => {});
   let ctx: Context | undefined;
   const fail = async (exitCode: CiExitCode, e: unknown): Promise<CiResult> => {
-    const message = ctx ? ctx.redact((e as Error).message) : (e as Error).message;
+    const message = ctx ? ctx.redact((e as Error)?.message ?? String(e)) : (e as Error)?.message ?? String(e);
     await publishError({ exitCode, error: e, env, notifyOn: o.config.notifyOn, redactors: ctx ? [ctx.redactor] : [], onWarn: (m) => progress({ type: 'warn', stage: 'report', message: m }) });
     return { exitCode, files: [], error: message, heals: [] };
   };
@@ -94,8 +94,13 @@ export async function runCi(o: CiOptions): Promise<CiResult> {
     progress({ type: 'error', stage: 'ci', message: ctx.redact((e as Error).message) });
   }
 
-  const report = buildSiteReport(ctx, o.url, { mode: 'ci', runs, heals, env });
-  const exitCode: CiExitCode = infra ? EXIT_CODES.LLM_OR_INFRA : report.totals.failed ? EXIT_CODES.TEST_FAILURES : EXIT_CODES.PASS;
-  const { files } = await publishReport(ctx, report, { exitCode, env });
-  return { exitCode, report, files, heals };
+  // Total: anything unexpected from here on (e.g. unreadable run history) is an infra error, never "test failures".
+  try {
+    const report = buildSiteReport(ctx, o.url, { mode: 'ci', runs, heals, env });
+    const exitCode: CiExitCode = infra ? EXIT_CODES.LLM_OR_INFRA : report.totals.failed ? EXIT_CODES.TEST_FAILURES : EXIT_CODES.PASS;
+    const { files } = await publishReport(ctx, report, { exitCode, env });
+    return { exitCode, report, files, heals };
+  } catch (e) {
+    return fail(EXIT_CODES.LLM_OR_INFRA, e);
+  }
 }

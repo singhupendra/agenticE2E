@@ -163,6 +163,16 @@ describe('ci command (SPEC-011)', () => {
     runnerThrows = true;
     expect(await cli('ci', U)).toBe(3);
   });
+  it('AC-14: unexpected error after preflight (corrupt run history) → 3 with step summary, never 1', async () => {
+    const f = path.join(dir, 'summary.md');
+    process.env.GITHUB_STEP_SUMMARY = f;
+    const bad = store().runDir('example.com', '2025-01-01T00-00-00-000Z');
+    fs.mkdirSync(bad, { recursive: true });
+    fs.writeFileSync(path.join(bad, 'result.json'), '{"id": "trunc');
+    expect(await cli('ci', U)).toBe(3);
+    expect(fs.readFileSync(f, 'utf8')).toMatch(/exit code 3/);
+    expect(err.join('\n')).toMatch(/Error:/);
+  });
   it('AC-15: appends a GitHub step summary, also on error', async () => {
     const f = path.join(dir, 'summary.md');
     fs.writeFileSync(f, '# previous\n');

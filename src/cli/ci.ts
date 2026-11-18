@@ -54,7 +54,14 @@ export function registerCiCommand(program: Command, h: {
         await publishError({ exitCode: EXIT_CODES.CONFIG_OR_AUTH, error: e });
         return h.setExit(EXIT_CODES.CONFIG_OR_AUTH);
       }
-      const r = await runCi({ config, url, allowHeal: !!o.allowHeal, onProgress: h.logEvent });
+      let r: Awaited<ReturnType<typeof runCi>>;
+      try {
+        r = await runCi({ config, url, allowHeal: !!o.allowHeal, onProgress: h.logEvent });
+      } catch (e) { // fallback: runCi is total, but an uncaught error must never look like "test failures"
+        console.error(`Error: ${(e as Error)?.message ?? String(e)}`);
+        await publishError({ exitCode: EXIT_CODES.LLM_OR_INFRA, error: e, notifyOn: config.notifyOn }).catch(() => {});
+        return h.setExit(EXIT_CODES.LLM_OR_INFRA);
+      }
       if (r.error) console.error(`Error: ${r.error}`);
       if (r.report) {
         console.log('\nCI result:');
