@@ -4,6 +4,8 @@
 #   3. put site logins in .agentic-e2e/credentials.json (see credentials.example.json); chmod 600 both files
 #   4. docker compose up -d --build   → http://localhost:4173 (paste the token)
 # Secrets are mounted read-only under /run/secrets at runtime, never baked into the image.
+# Linux hosts: compose file-secrets are bind mounts that keep host ownership, so make them readable by the container
+# user (uid 1001): `sudo chown 1001 .agentic-e2e/*.json && chmod 600 .agentic-e2e/*.json`.
 services:
   agentic-e2e:
     build: .

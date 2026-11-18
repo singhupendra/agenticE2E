@@ -346,6 +346,8 @@ touch .agentic-e2e/credentials.json && chmod 600 .agentic-e2e/*.json   # {} if y
 docker compose up -d --build   # http://localhost:4173
 ```
 
+On Linux, compose file-secrets keep their host owner: make them readable by the container user with `sudo chown 1001 .agentic-e2e/*.json` (keep `chmod 600`).
+
 **Config validation.** The config file is strict: `agentic-e2e config validate` reports unknown keys with a did-you-mean hint and type errors without echoing values; `agentic-e2e config show` prints the effective config (secret-bearing fields elided).
 
 **Storage backends.** `src/core/storage/` defines an async `StorageBackend` interface (`read/write/exists/stat/list/delete/createReadStream/healthCheck`) with a filesystem implementation (default) and `registerStorageBackend(kind, factory)` for others (e.g. S3). A new backend is done when it passes `test/helpers/storage-contract.ts`. The server already reads site files and runs its readiness probe through it.
