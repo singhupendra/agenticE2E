@@ -23,6 +23,8 @@
     "@anthropic-ai/bedrock-sdk": "^1.1.1",
     "@anthropic-ai/sdk": "^1.6.0",
     "@aws-sdk/credential-providers": "^3.1164.0",
+    "@fastify/helmet": "^13.2.0",
+    "@fastify/rate-limit": "^11.2.2",
     "@fastify/static": "^10.1.10",
     "@playwright/test": "^1.65.0",
     "commander": "^15.1.0",

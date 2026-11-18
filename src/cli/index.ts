@@ -16,6 +16,8 @@ import { listTestCases, type LastRun } from '../core/test-cases.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
 import { addReportOptions, commanderExitCode, registerCiCommand, reportCliConfig, reportRun } from './ci.js';
 import { addJourneyTagOptions, addScaleOptions, applyJourneyTagOptions, scaleCliConfig } from './scale.js';
+import { registerConfigCommands } from './commands/config.js';
+import { registerTokenCommands } from './commands/token.js';
 
 const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
 
@@ -278,14 +280,19 @@ export function buildProgram(setExit: (code: number) => void): Command {
 
   addCommon(program.command('serve').description('start the web UI + REST API'))
     .option('--port <n>', 'port', num, 4173)
-    .option('--host <host>', 'bind address (default 127.0.0.1; the server executes generated tests — do not expose publicly)', '127.0.0.1')
+    .option('--host <host>', 'bind address (default 127.0.0.1; the server executes generated tests — requires API tokens unless --insecure-local)', '127.0.0.1')
+    .option('--tokens-file <file>', 'hashed API tokens file (see `token create`); also AGENTIC_E2E_API_TOKENS(_FILE)')
+    .option('--insecure-local', 'no authentication (loopback only; every local request is admin)')
     .action(async (o) => {
-      const config = await loadConfig({ configFile: o.config, cli: cliConfig(o) });
+      const config = await loadConfig({ configFile: o.config, cli: { ...cliConfig(o), ...(o.tokensFile ? { server: { tokensFile: o.tokensFile } as Config['server'] } : {}) } });
       const { startServer } = await import('../server/index.js');
-      const { url } = await startServer({ config, port: o.port, host: o.host });
+      const { url } = await startServer({ config, port: o.port, host: o.host, insecureLocal: !!o.insecureLocal, handleSignals: true });
       console.log(`agentic-e2e UI: ${url}`);
-      await new Promise(() => {}); // run until killed
+      await new Promise(() => {}); // run until a signal triggers the graceful shutdown (SPEC-014)
     });
+
+  registerConfigCommands(program, setExit); // SPEC-014
+  registerTokenCommands(program); // SPEC-014
 
   return program;
 }

@@ -1,5 +1,6 @@
 import type { ModelInfo, ProviderId } from '../../src/core/llm/models';
 import type { HealRecord, Journey, ProgressEvent, ScreenshotMode } from '../../src/core/types';
+import { notifyUnauthorized } from './session';
 
 export interface Settings {
   screenshots: ScreenshotMode; fullPage: boolean; maxJourneys: number; maxPages: number; maxDepth: number;
@@ -22,6 +23,7 @@ export interface TestDetail { id: string; code: string; versions: { name: string
 export interface RunDetail { id: string; results: { journeyId: string; status: string; durationMs: number; error?: string; screenshots: string[]; tracePath?: string; failure?: { url: string; screenshot?: string } }[] }
 
 async function j<T>(res: Response): Promise<T> {
+  if (res.status === 401) notifyUnauthorized(); // SPEC-014: session expired/revoked → token screen
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
   return body as T;

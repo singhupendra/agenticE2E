@@ -5,6 +5,8 @@ import { PROVIDERS } from './llm/models.js';
 import { REPORT_FORMATS } from './reporting/model.js';
 import { NOTIFY_ON } from './reporting/notify.js';
 import { scaleConfigShape } from './scale/options.js';
+import { ConfigError, validateWith } from './config-check.js';
+import { serverEnv, serverSchema } from './security/server-config.js';
 
 export const SCREENSHOT_MODES = ['off', 'on-failure', 'every-step', 'end-of-journey'] as const;
 
@@ -46,7 +48,9 @@ export const configSchema = z.object({
   notifyOn: z.enum(NOTIFY_ON).default('always'),
   /** SPEC-012: browsers/devices, workers/retries/shard, environments, grep/tag filters, global timeout, trace/video. */
   ...scaleConfigShape,
-});
+  /** SPEC-014: web server / API security settings (never overridable per job). */
+  server: serverSchema.prefault({}),
+}).strict(); // SPEC-014: unknown keys are errors (with a did-you-mean hint), not silently ignored
 
 export type Config = z.infer<typeof configSchema>;
 export type PartialConfig = Partial<Config>;
@@ -73,6 +77,8 @@ export function resolveConfig(opts: {
   env?: Record<string, string | undefined>;
   cli?: PartialConfig;
   cwd?: string;
+  /** Shown in validation errors, e.g. `config file agentic-e2e.config.json`. */
+  source?: string;
 }): Config {
   const envCfg: Record<string, unknown> = {};
   for (const [name, { key, parse }] of Object.entries(ENV_MAP)) {
@@ -83,25 +89,32 @@ export function resolveConfig(opts: {
   // SPEC-004: Bedrock-specific model id; beats file/AGENTIC_E2E_MODEL, loses to an explicit CLI model.
   const bedrockModel = opts.env?.AGENTICQA_BEDROCK_MODEL_ID?.trim();
   if (bedrockModel && merged.provider === 'bedrock' && stripUndefined(opts.cli).model === undefined) merged.model = bedrockModel;
-  const parsed = configSchema.safeParse(merged);
-  if (!parsed.success) {
-    const msg = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
-    throw new Error(`Invalid configuration: ${msg}`);
-  }
-  const cfg = parsed.data;
+  const srvEnv = serverEnv(opts.env);
+  if (Object.keys(srvEnv).length || merged.server !== undefined) merged.server = { ...(opts.file?.server ?? {}), ...srvEnv, ...(opts.cli?.server ?? {}) };
+  const { issues, data } = validateWith(configSchema, merged, opts.source);
+  if (!data) throw new ConfigError(issues);
+  const cfg = data;
   cfg.dataDir = path.resolve(opts.cwd ?? process.cwd(), cfg.dataDir);
   if (cfg.reportDir) cfg.reportDir = path.resolve(opts.cwd ?? process.cwd(), cfg.reportDir);
   if (cfg.credentialsFile) cfg.credentialsFile = path.resolve(opts.cwd ?? process.cwd(), cfg.credentialsFile);
+  if (cfg.server.tokensFile) cfg.server.tokensFile = path.resolve(opts.cwd ?? process.cwd(), cfg.server.tokensFile);
   return cfg;
 }
 
 const CONFIG_NAMES = ['agentic-e2e.config.ts', 'agentic-e2e.config.mjs', 'agentic-e2e.config.js', 'agentic-e2e.config.json'];
 
+/** The config file that `loadConfigFile` would read (undefined = none, defaults only). */
+export function findConfigFile(dir: string, explicit?: string): string | undefined {
+  return explicit ? path.resolve(dir, explicit) : CONFIG_NAMES.map((n) => path.join(dir, n)).find((p) => fs.existsSync(p));
+}
+
 export async function loadConfigFile(dir: string, explicit?: string): Promise<PartialConfig> {
-  const file = explicit ? path.resolve(dir, explicit) : CONFIG_NAMES.map((n) => path.join(dir, n)).find((p) => fs.existsSync(p));
+  const file = findConfigFile(dir, explicit);
   if (!file) return {};
   if (!fs.existsSync(file)) throw new Error(`Config file not found: ${file}`);
-  if (file.endsWith('.json')) return JSON.parse(fs.readFileSync(file, 'utf8')) as PartialConfig;
+  if (file.endsWith('.json')) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')) as PartialConfig; } catch { throw new ConfigError([`${path.basename(file)} is not valid JSON`]); }
+  }
   const { createJiti } = await import('jiti');
   const jiti = createJiti(import.meta.url, { interopDefault: true });
   const mod = (await jiti.import(file, { default: true })) as PartialConfig;
@@ -111,5 +124,6 @@ export async function loadConfigFile(dir: string, explicit?: string): Promise<Pa
 export async function loadConfig(opts: { cwd?: string; configFile?: string; cli?: PartialConfig; env?: Record<string, string | undefined> } = {}): Promise<Config> {
   const cwd = opts.cwd ?? process.cwd();
   const file = await loadConfigFile(cwd, opts.configFile);
-  return resolveConfig({ file, env: opts.env ?? process.env, cli: opts.cli, cwd });
+  const found = findConfigFile(cwd, opts.configFile);
+  return resolveConfig({ file, env: opts.env ?? process.env, cli: opts.cli, cwd, source: found ? `config file ${path.basename(found)}` : undefined });
 }
