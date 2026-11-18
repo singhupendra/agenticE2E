@@ -56,15 +56,14 @@ export class AnthropicProvider implements DetailedLLMProvider {
       tools: [{ name: req.name, description: req.description, input_schema: inputSchema as Anthropic.Tool.InputSchema }],
       tool_choice: forced ? { type: 'tool', name: req.name } : { type: 'auto' },
     }, { maxRetries: 0, ...(callOpts.signal ? { signal: callOpts.signal } : {}), ...(this.opts.timeoutMs ? { timeout: this.opts.timeoutMs } : {}) });
-    const block = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === req.name);
-    if (!block) throw new LLMOutputError(`Model did not call tool ${req.name} (stop_reason=${res.stop_reason})`);
-    const parsed = req.schema.safeParse(block.input);
-    if (!parsed.success) throw new LLMOutputError(`Invalid ${req.name} output (schema): ${parsed.error.message}`, block.input);
     const u = res.usage;
-    return {
-      data: parsed.data,
-      model: this.model,
-      usage: { inputTokens: u?.input_tokens ?? 0, outputTokens: u?.output_tokens ?? 0, cacheReadTokens: u?.cache_read_input_tokens ?? 0, cacheWriteTokens: u?.cache_creation_input_tokens ?? 0 },
-    };
+    const usage = { inputTokens: u?.input_tokens ?? 0, outputTokens: u?.output_tokens ?? 0, cacheReadTokens: u?.cache_read_input_tokens ?? 0, cacheWriteTokens: u?.cache_creation_input_tokens ?? 0 };
+    // SPEC-013: an invalid response is still paid for, so its usage travels with the error (budgets + reports count it).
+    const invalid = (message: string, raw?: unknown) => Object.assign(new LLMOutputError(message, raw), { usage, model: this.model });
+    const block = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === req.name);
+    if (!block) throw invalid(`Model did not call tool ${req.name} (stop_reason=${res.stop_reason})`);
+    const parsed = req.schema.safeParse(block.input);
+    if (!parsed.success) throw invalid(`Invalid ${req.name} output (schema): ${parsed.error.message}`, block.input);
+    return { data: parsed.data, model: this.model, usage };
   }
 }

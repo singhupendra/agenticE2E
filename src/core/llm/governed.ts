@@ -83,10 +83,23 @@ export class GovernedLLM implements LLMProvider {
     } catch (e) {
       const retries = (e as { retries?: number }).retries ?? 0;
       if ((e as Error)?.name !== 'LLMBudgetError') {
-        const rec = usage.record({ name: req.name, ...target, ...ZERO, latencyMs: Date.now() - started, costUsd: 0, retries, cached: false, ok: false, error: (e as Error).message });
-        log?.error({ call: rec.n, name: req.name, model: target.model, retries, error: (e as Error).message }, 'llm.failed');
-        span?.setAttributes({ 'agentic_e2e.retries': retries });
+        // A response that arrived but was unusable (e.g. LLMOutputError) carries the usage it was billed for.
+        const paid = (e as { usage?: LLMTokenUsage }).usage;
+        const model = (e as { model?: string }).model ?? target.model;
+        const u = paid ?? ZERO;
+        const costUsd = paid ? estimateCostUsd(model, u) : 0;
+        const rec = usage.record({ name: req.name, provider: target.provider, model, ...u, latencyMs: Date.now() - started, costUsd, retries, cached: false, ok: false, error: (e as Error).message });
+        log?.error({ call: rec.n, name: req.name, model, retries, ...(paid ? { ...u, costUsd } : {}), error: (e as Error).message }, 'llm.failed');
+        span?.setAttributes({ 'agentic_e2e.retries': retries, ...(paid ? { 'gen_ai.usage.input_tokens': u.inputTokens, 'gen_ai.usage.output_tokens': u.outputTokens, 'agentic_e2e.cost_usd': costUsd } : {}) });
         span?.recordError(e);
+        if (paid) {
+          try {
+            usage.check('after'); // the budget applies to paid-for failures too
+          } catch (b) {
+            log?.error({ call: rec.n, name: req.name, error: (b as Error).message }, 'llm.budget_exceeded');
+            throw b;
+          }
+        }
       }
       throw e;
     } finally {

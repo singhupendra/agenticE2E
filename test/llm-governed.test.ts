@@ -9,7 +9,7 @@ import { MockLLM } from '../src/core/llm/mock.js';
 import { RedactingLLM } from '../src/core/llm/redacting.js';
 import { ResponseCache } from '../src/core/llm/response-cache.js';
 import { UsageTracker, formatUsageSummary } from '../src/core/llm/usage.js';
-import { LLMBudgetError, type LLMCallOptions, type LLMProvider, type LLMResult, type LLMTokenUsage, type StructuredRequest } from '../src/core/llm/types.js';
+import { LLMBudgetError, LLMOutputError, type LLMCallOptions, type LLMProvider, type LLMResult, type LLMTokenUsage, type StructuredRequest } from '../src/core/llm/types.js';
 import { createLogger } from '../src/core/obs/logger.js';
 import { Redactor } from '../src/core/redact.js';
 
@@ -113,6 +113,39 @@ describe('SPEC-013 budgets', () => {
   });
 });
 
+describe('SPEC-013 usage of paid-for but invalid responses (review r4611577658)', () => {
+  /** Returns usage, then throws LLMOutputError with it attached — like AnthropicProvider on schema-invalid output. */
+  class InvalidOutputProvider implements LLMProvider {
+    calls = 0;
+    async structured<T>(): Promise<T> { throw new Error('unused'); }
+    async structuredDetailed<T>(): Promise<LLMResult<T>> {
+      this.calls++;
+      throw Object.assign(new LLMOutputError('Invalid write_playwright_spec output (schema)'), { usage: usage(1000, 600), model: 'claude-sonnet-5-5' });
+    }
+  }
+
+  it('counts the tokens and cost of an LLMOutputError response', async () => {
+    const tracker = new UsageTracker();
+    const llm = new GovernedLLM(new InvalidOutputProvider(), { provider: 'anthropic', model: 'claude-sonnet-5-5', usage: tracker, retry: noSleep });
+    await expect(llm.structured(req())).rejects.toBeInstanceOf(LLMOutputError);
+    expect(tracker.calls[0]).toMatchObject({ ok: false, inputTokens: 1000, outputTokens: 600, model: 'claude-sonnet-5-5' });
+    expect(tracker.calls[0].costUsd).toBeCloseTo(0.008, 10);
+    expect(tracker.totals()).toMatchObject({ failed: 1, totalTokens: 1600 });
+  });
+
+  it('invalid-output responses trip the budget', async () => {
+    const p = new InvalidOutputProvider();
+    const tracker = new UsageTracker({ budget: { maxCostPerRun: 0.01 } });
+    const llm = new GovernedLLM(p, { provider: 'anthropic', model: 'claude-sonnet-5-5', usage: tracker, retry: noSleep });
+    await expect(llm.structured(req())).rejects.toBeInstanceOf(LLMOutputError); // $0.008
+    const e = await llm.structured(req()).catch((x) => x); // $0.016 > $0.01
+    expect(e).toBeInstanceOf(LLMBudgetError);
+    expect(e.message).toMatch(/maxCostPerRun/);
+    await expect(llm.structured(req())).rejects.toBeInstanceOf(LLMBudgetError);
+    expect(p.calls).toBe(2);
+  });
+});
+
 describe('SPEC-013 response cache', () => {
   const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'llmcache-'));
   const files = (d: string): string[] => (fs.existsSync(d) ? fs.readdirSync(d, { recursive: true }).map(String).filter((f) => f.endsWith('.json')) : []);
@@ -194,6 +227,15 @@ describe('SPEC-013 AnthropicProvider usage, prompt caching and retry options', (
     const forced = fake();
     await new AnthropicProvider({ model: 'claude-opus-5-5', client: forced.client, promptCaching: true }).structured(r);
     expect(forced.calls[0].body.system[0].text).toMatch(/calling the `t` tool/);
+  });
+
+  it('attaches usage and model to LLMOutputError (schema-invalid or missing tool call)', async () => {
+    const make = (content: unknown[]) => ({ messages: { create: async () => ({ content, stop_reason: 'end_turn', usage: { input_tokens: 7, output_tokens: 8 } }) } }) as any;
+    const bad = await new AnthropicProvider({ model: 'claude-haiku-4-5', client: make([{ type: 'tool_use', name: 't', input: { nope: 1 } }]) }).structuredDetailed(r).catch((x) => x);
+    expect(bad).toBeInstanceOf(LLMOutputError);
+    expect(bad).toMatchObject({ usage: { inputTokens: 7, outputTokens: 8, cacheReadTokens: 0, cacheWriteTokens: 0 }, model: 'claude-haiku-4-5' });
+    const none = await new AnthropicProvider({ model: 'claude-haiku-4-5', client: make([{ type: 'text', text: 'hi' }]) }).structuredDetailed(r).catch((x) => x);
+    expect(none).toMatchObject({ usage: { inputTokens: 7, outputTokens: 8 } });
   });
 
   it('missing usage fields default to 0', async () => {
