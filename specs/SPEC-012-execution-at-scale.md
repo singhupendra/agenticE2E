@@ -50,7 +50,7 @@
 |----|-------------|
 | FR-8 | Config `environments: { <name>: { baseUrl, headers?, readOnly? } }` and `env` (CLI `--env <name>`, env var `AGENTIC_E2E_ENV`). Unknown env name → error listing env names. |
 | FR-9 | With an env selected, `run`/`heal`/`all`'s run step use the env `baseUrl` for the stored journeys of the `<url>` site (site id and stored data still come from `<url>`). Without one, behaviour is unchanged. |
-| FR-10 | `headers` become Playwright `extraHTTPHeaders`. Values may contain `${VAR}` (resolved from the environment when the env is used; unset → error naming the variable on the CLI, generic message to web clients). Header values are never written to disk (passed to the test process in an env var, not in `playwright.config.mjs`), are added to the redactor, and never appear in logs/progress/run records/API responses. |
+| FR-10 | `headers` become Playwright `extraHTTPHeaders`; tracing is forced off while env headers are sent (traces record request headers). Values may contain `${VAR}` (resolved from the environment when the env is used; unset → error naming the variable on the CLI, generic message to web clients). Header values are never written to disk (passed to the test process in an env var, not in `playwright.config.mjs`), are added to the redactor, and never appear in logs/progress/run records/API responses. |
 | FR-11 | `readOnly` defaults to `true` for envs named `prod`/`production` (case-insensitive), else `false`. In a read-only env destructive journeys are skipped with a `warn` progress event and are not part of the run. |
 | FR-12 | A journey is destructive when its tags include `destructive`; tags including `read-only` make it non-destructive; otherwise a heuristic on name/goal/steps (delete/remove/cancel subscription/deactivate/unsubscribe/purchase/pay/checkout/place order/refund/transfer/log out…) decides. |
 | FR-13 | In auth mode with an env whose host differs from `<url>`, the login session is resolved for the env host (credentials file entry of that host). |
@@ -79,7 +79,7 @@
 | FR-21 | Every `TestResult` records `project`, `browser`, `device?` and `env?`; `RunRecord` records `env?`, `baseUrl`, `targets`, `workers`, `retries`, `shard?`, and the filters used. One result per (journey, project). Screenshots / failure dumps are stored per project when more than one project runs. |
 | FR-22 | Healing heals each journey once (first failing result), and a re-run counts as passed only when every project of that journey passed. `runAll().final` has one entry per journey (failed if any project failed). |
 | FR-23 | `listTestCases` reports per test `tags` and `targets` (latest outcome per env × project); `lastRun` aggregates the latest run containing the test (failed if any project failed). `list-test-cases --env <name>` and heal `--failed --env <name>` consider only runs of that env. |
-| FR-24 | Web clients cannot set `environments` in job options (only `env` by name); `/api/config` returns environments as `{ baseUrl, readOnly, headers: <header names> }` without values. |
+| FR-24 | Web clients cannot set `environments`: the key is ignored in job options (the UI round-trips `/api/config`); they pick one by name with `env`; `/api/config` returns environments as `{ baseUrl, readOnly, headers: <header names> }` without values. |
 
 ## 4. Acceptance criteria
 
@@ -100,5 +100,5 @@
 - **AC-15** Given two projects (`chromium`, `Pixel 7`), When a run with a failing test completes, Then there are two results for that journey with distinct `project`, failure dumps do not overwrite each other, and the stored run record keeps both.
 - **AC-16** Given a run in which journey `x` failed only on `firefox`, When healing, Then `x` is healed once, and `runAll().final` reports `x` failed (single entry).
 - **AC-17** Given a failing staging run and a later passing dev run of `x`, When `list-test-cases --env staging`, Then `x`'s last outcome is `failed`; without `--env` it is `passed`; `targets` lists both env×project entries.
-- **AC-18** Given a job request with `options.environments`, Then it is rejected (400); `GET /api/config` never contains a header value.
+- **AC-18** Given a job request with `options.environments`, Then it is ignored and the server's environments are used; `GET /api/config` never contains a header value.
 - **AC-19** All previous tests pass; `pnpm typecheck` passes.

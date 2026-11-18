@@ -16,6 +16,8 @@ export interface Journey {
   requiresAuth?: boolean;
   /** SPEC-009: name of the credentials-file user the journey runs as (a name, never a secret). */
   user?: string;
+  /** SPEC-012: per-journey test timeout (overrides testTimeoutMs). */
+  timeoutMs?: number;
 }
 
 export interface ElementInfo {
@@ -53,6 +55,15 @@ export interface TestResult {
   tracePath?: string;
   screenshots: string[];
   failure?: FailureSnapshot;
+  /** SPEC-012: Playwright project (target name, `<target> [auth]` for logged-in tests), browser engine, device preset, environment. */
+  project?: string;
+  browser?: string;
+  device?: string;
+  env?: string;
+  /** SPEC-012: attempts - 1, and passed only after a retry */
+  retries?: number;
+  flaky?: boolean;
+  videoPath?: string;
 }
 export interface RunRecord {
   id: string;
@@ -63,6 +74,14 @@ export interface RunRecord {
   screenshots: ScreenshotMode;
   fullPage: boolean;
   results: TestResult[];
+  /** SPEC-012 */
+  env?: string;
+  baseUrl?: string;
+  targets?: { name: string; browser: string; device?: string }[];
+  workers?: number | string;
+  retries?: number;
+  shard?: { current: number; total: number };
+  filters?: { grep?: string; tag?: string[] };
 }
 
 export type HealVerdict = 'test_breakage' | 'app_bug' | 'flaky_or_environment';

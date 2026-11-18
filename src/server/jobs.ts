@@ -21,7 +21,8 @@ export interface Job {
 }
 
 /** Options a web client may override per job. dataDir/model-provider internals are deliberately excluded. */
-const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true }).partial()
+// SPEC-012: `environments` (header values may be secrets) is server-only; clients pick one by name with `env`.
+const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true, environments: true }).partial()
   .extend({ awsProfile: configSchema.shape.awsProfile.unwrap().nullable().optional() }).strict();
 
 /** Effective config for a job: server config overlaid with the client's options. */
@@ -38,7 +39,10 @@ export function parseJobRequest(body: unknown): JobRequest {
   if (!ACTIONS.includes(b.action as Action)) throw new Error(`action must be one of ${ACTIONS.join(', ')}`);
   if (typeof b.url !== 'string') throw new Error('url is required');
   normalizeSite(b.url);
-  const opts = optionsSchema.safeParse(b.options ?? {});
+  // SPEC-012: `environments` is server-only. The UI round-trips /api/config (which shows env header *names*) as options,
+  // so it is dropped, never applied.
+  const { environments: _serverOnly, ...clientOptions } = (b.options ?? {}) as Record<string, unknown>;
+  const opts = optionsSchema.safeParse(clientOptions);
   if (!opts.success) throw new Error('Invalid options: ' + opts.error.issues.map((i) => `${i.path.join('.') || 'options'}: ${i.message}`).join('; '));
   const ids = b.journeyIds;
   if (ids !== undefined && !(Array.isArray(ids) && ids.every((x) => typeof x === 'string'))) throw new Error('journeyIds must be a string array');
@@ -46,7 +50,7 @@ export function parseJobRequest(body: unknown): JobRequest {
   if (b.failedOnly !== undefined && b.action !== 'heal') throw new Error('failedOnly only applies to action "heal"');
   // zod fills in schema defaults for absent keys; keep only what the client sent, or an omitted `provider`/`model`/... would
   // silently reset the server's own configuration.
-  const sent = (b.options ?? {}) as Record<string, unknown>;
+  const sent = clientOptions;
   const options = Object.fromEntries(Object.entries(opts.data).filter(([k]) => k in sent)) as JobOptions;
   return { action: b.action as Action, url: b.url, options, journeyIds: ids as string[] | undefined, ...(b.failedOnly === undefined ? {} : { failedOnly: b.failedOnly }), rediscover: b.rediscover === true, regenerate: b.regenerate === true };
 }

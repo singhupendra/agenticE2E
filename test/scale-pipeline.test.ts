@@ -11,7 +11,7 @@ import { listTestCases } from '../src/core/test-cases.js';
 import { Store, normalizeSite } from '../src/core/storage.js';
 import { main } from '../src/cli/index.js';
 import { buildApp } from '../src/server/app.js';
-import { parseJobRequest } from '../src/server/jobs.js';
+import { mergeJobConfig, parseJobRequest } from '../src/server/jobs.js';
 import type { Journey, PageModel, ProgressEvent, RunRecord, TestResult } from '../src/core/types.js';
 import { startScaleSite, OK_SPEC, type ScaleSite } from './helpers/scale-site.js';
 
@@ -176,14 +176,14 @@ describe('SPEC-012 history per env/target (AC-17)', () => {
 describe('SPEC-012 server (AC-18)', () => {
   let app: FastifyInstance;
   afterEach(async () => { await app?.close(); });
-  it('never returns env header values and rejects client-provided environments', async () => {
+  it('never returns env header values and ignores client-provided environments', async () => {
     const config = resolveConfig({ file: { dataDir, environments: { staging: { baseUrl: 'https://stg.example.test', headers: { authorization: 'Bearer srv-secret-123' } } } } as never, env: {} });
     app = await buildApp({ config, webDir: path.join(dataDir, 'no-web') });
     const body = (await app.inject('/api/config')).body;
     expect(body).not.toContain('srv-secret-123');
     expect(JSON.parse(body).environments).toEqual({ staging: { baseUrl: 'https://stg.example.test', readOnly: false, headers: ['authorization'] } });
-    const bad = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: URL_, options: { environments: { x: { baseUrl: 'https://evil.test' } } } } });
-    expect(bad.statusCode).toBe(400);
+    expect(parseJobRequest({ action: 'run', url: URL_, options: { environments: { x: { baseUrl: 'https://evil.test' } } } }).options).toEqual({});
+    expect(mergeJobConfig(config, parseJobRequest({ action: 'run', url: URL_, options: JSON.parse(body) }).options).environments).toEqual(config.environments);
     expect(parseJobRequest({ action: 'run', url: URL_, options: { env: 'staging', browsers: ['firefox'], tag: ['smoke'], retries: 1 } }).options).toEqual({ env: 'staging', browsers: ['firefox'], tag: ['smoke'], retries: 1 });
   });
 });

@@ -12,10 +12,11 @@ import type { LLMProvider } from '../core/llm/types.js';
 import { packageRoot } from '../core/paths.js';
 import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases } from '../core/test-cases.js';
+import { publicEnvironments } from '../core/scale/environments.js';
 import { JobManager, parseJobRequest } from './jobs.js';
 
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
-const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain' };
+const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain', '.webm': 'video/webm' };
 
 /** `awsEnv` is a test seam: the environment used to locate the AWS config/credentials files (default: process.env). */
 export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string; host?: string; awsEnv?: Record<string, string | undefined> }): Promise<FastifyInstance> {
@@ -58,8 +59,8 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
 
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
-    const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, ...pub } = opts.config;
-    return pub;
+    const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, environments, ...pub } = opts.config;
+    return { ...pub, environments: publicEnvironments(environments) }; // SPEC-012: header names only, never values
   });
   app.get<{ Querystring: { provider?: string } }>('/api/models', async (req, reply) => {
     const provider = req.query.provider ?? opts.config.provider;
@@ -95,7 +96,7 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
       journeys: store.loadJourneys(id) ?? [],
       pages: (store.loadPages(id) ?? []).map((p) => ({ path: p.path, title: p.title, depth: p.depth, screenshot: p.screenshot })),
       tests: store.listTests(id).map((t) => ({ id: t, versions: store.listTestVersions(id, t) })),
-      runs: store.listRuns(id).map((r) => ({ id: r.id, kind: r.kind, startedAt: r.startedAt, screenshots: r.screenshots, results: r.results.map((x) => ({ journeyId: x.journeyId, status: x.status })) })).reverse(),
+      runs: store.listRuns(id).map((r) => ({ id: r.id, kind: r.kind, startedAt: r.startedAt, screenshots: r.screenshots, env: r.env, results: r.results.map((x) => ({ journeyId: x.journeyId, status: x.status, project: x.project, env: x.env })) })).reverse(),
       heals: store.loadHeals(id).slice().reverse(),
     };
   });

@@ -1,6 +1,7 @@
 import type { LLMProvider } from './llm/types.js';
 import { journeyProposalSchema, journeyRankingSchema } from './llm/schemas.js';
 import type { Journey, PageModel } from './types.js';
+import { withDefaultTags } from './scale/tags.js';
 
 export function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50).replace(/-+$/, '') || 'journey';
@@ -30,6 +31,11 @@ LOGGED-IN MODE: the pages were captured while logged in as the test user "${user
 Journeys that need the logged-in session (account, orders, settings, dashboards, ...) are welcome: set "requiresAuth": true and "user" to one of the available user names. Leave requiresAuth unset for journeys that work anonymously.
 Never put real credentials, e-mail addresses or other account identifiers in steps; refer to them as {{username}} / {{password}}. Do not propose logging out, deleting or removing data, cancelling subscriptions, payments or any destructive or irreversible action.`;
 
+/** SPEC-012 FR-14 */
+const TAGS_RULE = `
+
+Tags: give every journey suite tags from "smoke" (fast core sanity check), "regression" (full suite) and "critical" (business-critical flow), and add "destructive" when the journey creates, changes or deletes data, submits orders or payments, or logs out.`;
+
 export interface ProposeOptions { auth?: { user: string; userNames: string[] } }
 
 const PROPOSE_SYSTEM_AUTH = `You are a senior QA engineer designing end-to-end user journeys for a website, from compact models of its pages.
@@ -39,7 +45,7 @@ Rules: only use pages/elements that appear in the models; each journey has a sho
 export async function proposeJourneys(llm: LLMProvider, pages: PageModel[], opts: ProposeOptions = {}): Promise<Journey[]> {
   if (!pages.length) throw new Error('No pages to plan from');
   const auth = opts.auth;
-  const system = auth ? PROPOSE_SYSTEM_AUTH + AUTH_ADDENDUM(auth.user, auth.userNames) : PROPOSE_SYSTEM;
+  const system = (auth ? PROPOSE_SYSTEM_AUTH + AUTH_ADDENDUM(auth.user, auth.userNames) : PROPOSE_SYSTEM) + TAGS_RULE;
   const prompt = `Site pages (${pages.length}):\n\n${pages.map((p) => pageToPrompt(p)).join('\n\n')}\n\nPropose candidate user journeys.`;
   const out = await llm.structured({ name: 'propose_journeys', description: 'Propose candidate user journeys for the site.', system, prompt, schema: journeyProposalSchema });
   const used = new Set<string>();
@@ -48,7 +54,7 @@ export async function proposeJourneys(llm: LLMProvider, pages: PageModel[], opts
     let id = base;
     for (let i = 2; used.has(id); i++) id = `${base}-${i}`;
     used.add(id);
-    const journey: Journey = { id, name: j.name, goal: j.goal, priority: j.priority, tags: j.tags ?? [], steps: j.steps, status: 'proposed' };
+    const journey: Journey = { id, name: j.name, goal: j.goal, priority: j.priority, tags: withDefaultTags(j.priority, j.tags), steps: j.steps, status: 'proposed' };
     if (auth && j.requiresAuth) {
       journey.requiresAuth = true;
       journey.user = j.user && auth.userNames.includes(j.user) ? j.user : auth.user;

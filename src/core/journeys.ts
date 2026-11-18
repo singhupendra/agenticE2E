@@ -13,6 +13,7 @@ export const journeySchema = z.object({
   rationale: z.string().optional(),
   requiresAuth: z.boolean().optional(),
   user: z.string().optional(),
+  timeoutMs: z.number().int().positive().optional(),
 });
 
 /** Validate user-edited journeys (CLI --edit, REST PUT). */

@@ -6,6 +6,8 @@ export interface HealSelectionRequest {
   ids?: string[];
   /** Only tests whose latest stored run outcome is `failed`. */
   failedOnly?: boolean;
+  /** SPEC-012: with failedOnly, only runs of this environment count. */
+  env?: string;
 }
 
 export interface HealSelection {
@@ -28,7 +30,7 @@ export class HealSelectionError extends Error {
 
 /** Resolve and validate which tests to heal. Read-only; throws before anything is run or any LLM is called. */
 export function resolveHealSelection(store: Store, siteId: string, req: HealSelectionRequest = {}): HealSelection {
-  const listing = listTestCases(store, siteId);
+  const listing = listTestCases(store, siteId, req.env ? { env: req.env } : {});
   if (!listing) throw new UnknownSiteError(siteId);
   const validIds = listing.tests.map((t) => t.journeyId);
   const requested = [...new Set(req.ids ?? [])];
