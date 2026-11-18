@@ -111,6 +111,7 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `aws-profiles` | list AWS profiles from `~/.aws/config` / `~/.aws/credentials` for `--aws-profile` |
 | `list` | known sites with journey/test/run counts |
 | `list-test-cases <url>` | the stored generated tests of one site: journey id, name, journey status (as stored), latest run outcome (`passed`/`failed`/`healed`/`skipped`/`never run`, with timestamp) and spec file path, and an `AUTH` column (the user a logged-in journey runs as, `-` otherwise). `--json` for machine-readable output (`{site, dataDir, tests[]}`; tests carry `requiresAuth`/`user`). Exits 1 for an unknown site; exits 0 with a message when the site has no generated tests yet. Read-only, no LLM credentials needed |
+| `ci <url>` | non-interactive CI run of **stored** tests (never discovers, generates or prompts). `--retries <n>` re-runs failures without the LLM, `--allow-heal` heals what still fails (otherwise no LLM call and no spec is modified). Documented exit codes, reports, job summary and notifications — see [Reports & CI](#reports--ci) |
 | `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`) |
 
 Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--aws-profile <name>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`, and for logged-in testing `--auth`, `--user <name>`, `--credentials <file>`. Patterns are case-insensitive substrings, or `/regex/flags`.
@@ -161,6 +162,51 @@ export default {
 | `testTimeoutMs` | `30000` | per-test timeout (action/expect timeouts are a third of it) |
 | `credentialsFile` | `.agentic-e2e/credentials.json` | logged-in testing; env `AGENTIC_E2E_CREDENTIALS`, flag `--credentials` (flag > env > config file > default). Never exposed by the API |
 | `auth` / `authUser` | `false` / – | logged-in mode and which named user to use; flags `--auth` / `--user` |
+| `reporters` | `['junit','json','html']` | report formats for `run`/`heal`/`all`/`ci`; flag `--reporter junit,json` (`none` = off) |
+| `reportDir` | – | also write reports (with screenshots copied to `assets/`) here; env `AGENTIC_E2E_REPORT_DIR`, flag `--report-dir` |
+| `retries` | `0` | `ci` only: plain re-runs of failing tests (max 10); flag `--retries` |
+| `notifyOn` | `always` | `always` \| `failure` \| `never`; flag `--notify-on`. Webhook URLs come from env only |
+
+## Reports & CI
+
+Every `run`, `heal`, `all` and `ci` writes, under `data/sites/<site>/runs/<runId>/reports/` (and `--report-dir` if set):
+
+| File | Contents |
+|---|---|
+| `junit.xml` | JUnit XML, one `<testsuite>` per site, one `<testcase>` per journey; `<failure>`/`<skipped/>`, properties `outcome`/`attempts`/`flaky`/`healed`, heal reason + diff in `<system-out>` |
+| `summary.json` | `schemaVersion: 1` run summary: site, mode, run, totals (`tests/passed/failed/skipped/healed/flaky`), per test outcome, duration, attempts, error, flaky info, heal (outcome, verdict, reason, diff), screenshot/trace paths (relative to the site dir) |
+| `report.html` | self-contained (inline CSS, no scripts, no external resources): totals, test table, per-test error, heal diff, screenshot thumbnails. In `--report-dir` screenshots are copied to `assets/`, so the directory can be uploaded as one CI artifact |
+
+```bash
+agentic-e2e ci https://shop.example.com --retries 1 --report-dir reports/
+```
+
+`ci` exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | all tests passed (including passed on retry and, with `--allow-heal`, healed) |
+| `1` | at least one test failed |
+| `2` | config/auth error: invalid config or flags, unknown site, no stored tests, credentials file / unknown user, login failed, missing LLM credentials with `--allow-heal` |
+| `3` | LLM/infra error: the runner crashed, or a heal was aborted by an LLM/transport error |
+
+When several apply: 2 > 3 > 1. Login and (with `--allow-heal`) the LLM provider are checked before any test runs.
+
+**GitHub Actions:** when `GITHUB_STEP_SUMMARY` is set, a Markdown summary (totals + one row per test) is appended to it — also on exit 2/3.
+
+```yaml
+- run: pnpm cli ci ${{ vars.SITE_URL }} --retries 1 --report-dir e2e-report
+  env: { AGENTIC_E2E_SLACK_WEBHOOK_URL: ${{ secrets.SLACK_E2E_WEBHOOK }} }
+- uses: actions/upload-artifact@v4
+  if: always()
+  with: { name: e2e-report, path: e2e-report }
+```
+
+**Notifications** (on completion; gated by `notifyOn`): `AGENTIC_E2E_WEBHOOK_URL` receives a JSON POST (`event: "run.completed"`, `site`, `runId`, `mode`, `status` `passed|failed|error`, `exitCode`, `totals`, `failed[{journeyId, error}]` with first-line errors ≤ 300 chars, `flaky[]`); `AGENTIC_E2E_SLACK_WEBHOOK_URL` receives a Slack incoming-webhook `{text}`. URLs must be `https` (`http` only for localhost), redirects are not followed, 10 s timeout; a failed delivery prints a warning (never the URL) and does not change the exit code.
+
+**Flaky tests:** a test is flaky when, in its last 10 results (heal re-runs and history before its latest successful heal ignored), it passed on a `--retries` re-run right after failing or got a `flaky_or_environment` heal verdict (`passed_on_retry`), or flipped pass↔fail at least twice (`alternating`). Shown in all reports and as a `FLAKY` column / `flaky` field in `list-test-cases`.
+
+**Secrets:** reports, summaries and notifications go through the credential redactor (SPEC-009), the values of `ANTHROPIC_API_KEY`, `AWS_BEARER_TOKEN_BEDROCK`, `AWS_*` keys, `GITHUB_TOKEN` and the webhook URLs, and a scrubber for key shapes (`sk-ant-…`, `AKIA…`, `ABSK…`, `Bearer …`, Slack hook URLs). They never contain the config or the credentials file path.
 
 ## Logged-in testing
 
@@ -232,6 +278,7 @@ data/sites/<host[_port]>/
   tests/_support.ts                 # step() fixture, screenshots, failure snapshots (managed by the tool)
   tests/.versions/<id>/{original,healed-N}.spec.ts
   runs/<timestamp>/{result.json, report.json, output.log, failures/, artifacts/ (traces)}
+  runs/<timestamp>/reports/{junit.xml, summary.json, report.html}   # SPEC-011
   screenshots/<timestamp>/<journey-id>/*.png   screenshots/discovery/*.png
 ```
 
