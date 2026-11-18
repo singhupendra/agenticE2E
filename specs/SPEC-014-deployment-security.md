@@ -124,7 +124,7 @@
 
 **Roles**
 - AC-6: Given role viewer, when `GET /api/sites`, then 200; when `POST /api/jobs {action:"run"}`, then 403.
-- AC-7: Given role operator, when `POST /api/jobs {action:"run"}` with options equal to `/api/config`, then 202; when `{action:"discover"}`, then 403; when `{action:"run", options:{model:"other"}}`, then 403; when `PUT …/journeys`, then 403.
+- AC-7: Given role operator, when `POST /api/jobs {action:"run"}` with options equal to `/api/config` — including when `environments` is configured (the UI round-trips its public form; roles are decided on the options `parseJobRequest` keeps, the same ones the job uses) — then 202; when `{action:"discover"}`, then 403; when `{action:"run", options:{model:"other"}}`, then 403; when `PUT …/journeys`, then 403.
 - AC-8: Given role admin, when `POST /api/jobs {action:"discover"}` or `PUT …/journeys`, then not 401/403.
 - AC-9: Given auth mode tokens, when a request has no / an invalid Bearer token, then 401 with `WWW-Authenticate: Bearer` and the body does not echo the token; percent-encoded API paths (`/%61pi/sites`, `POST /%61pi/jobs`) get the same 401/403 as the plain paths, with or without the web UI mounted.
 - AC-10: Given a valid token, when `POST /api/session`, then a `HttpOnly; SameSite=Strict` `ae2e_session` cookie is set and a subsequent cookie-only `GET /api/sites` is 200 and `GET /api/session` reports name and role; after `DELETE /api/session` the cookie is rejected (401).

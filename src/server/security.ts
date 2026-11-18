@@ -6,6 +6,7 @@ import type { Config } from '../core/config.js';
 import { OPERATOR_ACTIONS, OPERATOR_JOB_OPTIONS, roleAtLeast, type Role } from '../core/security/roles.js';
 import type { Principal, TokenRegistry } from '../core/security/tokens.js';
 import type { StorageBackend } from '../core/storage/backend.js';
+import { parseJobRequest } from './jobs.js';
 import type { Lifecycle } from './lifecycle.js';
 
 /**
@@ -72,13 +73,19 @@ class SessionStore {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
-/** Role needed for a request (after body parsing). */
+/**
+ * Role needed for a request (after body parsing). For jobs the decision is made on the *sanitised* options
+ * `parseJobRequest` returns — exactly what the job will use — so authorisation and execution cannot diverge (e.g.
+ * server-only keys like `environments`, which the UI round-trips in their public form, are dropped by both). A request
+ * that does not parse never runs (the handler answers 400), so only its action decides the role.
+ */
 export function requiredRole(method: string, routeUrl: string | undefined, body: unknown, base: Config): { role: Role; reason?: string } {
   if (method === 'GET' || method === 'HEAD') return { role: 'viewer' };
   if (method === 'POST' && routeUrl === '/api/jobs') {
-    const b = (body ?? {}) as { action?: unknown; options?: unknown };
-    if (!OPERATOR_ACTIONS.has(String(b.action))) return { role: 'admin' };
-    const opts = b.options && typeof b.options === 'object' && !Array.isArray(b.options) ? (b.options as Record<string, unknown>) : {};
+    const action = String((body as { action?: unknown } | null)?.action);
+    if (!OPERATOR_ACTIONS.has(action)) return { role: 'admin' };
+    let opts: Record<string, unknown>;
+    try { opts = (parseJobRequest(body).options ?? {}) as Record<string, unknown>; } catch { return { role: 'operator' }; }
     const changed = Object.keys(opts).filter((k) => !OPERATOR_JOB_OPTIONS.has(k) && !same(opts[k], (base as Record<string, unknown>)[k]));
     return changed.length ? { role: 'admin', reason: `changing settings (${changed.join(', ')})` } : { role: 'operator' };
   }
