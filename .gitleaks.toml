@@ -1,0 +1,9 @@
+# SPEC-010 FR-4 — default gitleaks rules; only the documented fake-value example file is allowlisted.
+title = "agenticE2E gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Committed example file with fake values only (SPEC-009 FR-7)"
+paths = ['''^credentials\.example\.json$''']

@@ -87,7 +87,11 @@ describe('findForbiddenTrackedFiles + CLI (SPEC-010 AC-2..AC-4)', () => {
   it('exits 2 outside a git repository', () => {
     const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'not-a-repo-'));
     try {
-      const r = spawnSync(tsx, [script], { cwd: plain, encoding: 'utf8', env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(plain) } });
+      const r = spawnSync(tsx, [script], {
+        cwd: plain,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_CEILING_DIRECTORIES: path.dirname(plain) },
+      });
       expect(r.status).toBe(2);
     } finally {
       fs.rmSync(plain, { recursive: true, force: true });

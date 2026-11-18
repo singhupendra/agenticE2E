@@ -45,7 +45,7 @@ describe('planner', () => {
 
   it('AC-14: excluded journeys are never selected even if LLM ranks them', async () => {
     const js = [mk('User login'), mk('Search')];
-    const llm = new MockLLM((req) => ({ ranked: [{ id: 'user-login', rationale: 'x' }, { id: 'search', rationale: 'y' }] }));
+    const llm = new MockLLM((_req) => ({ ranked: [{ id: 'user-login', rationale: 'x' }, { id: 'search', rationale: 'y' }] }));
     const out = await selectJourneys(llm, js, { maxJourneys: 5, include: [], exclude: ['login'] });
     expect(out.find((j) => j.id === 'user-login')!.status).toBe('proposed');
     expect(out.find((j) => j.id === 'search')!.status).toBe('selected');

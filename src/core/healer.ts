@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { LLMBudgetError, type LLMProvider } from './llm/types.js';
 import { healSchema } from './llm/schemas.js';

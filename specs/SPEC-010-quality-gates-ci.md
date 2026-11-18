@@ -70,7 +70,7 @@
 | ID | Requirement |
 |----|-------------|
 | FR-17 | Triggers: `schedule` (daily) and `workflow_dispatch`; never `pull_request`/`push`. The job runs only if repository variable `AGENTIC_E2E_NIGHTLY == 'true'` (or on manual dispatch with that variable set) — unset ⇒ skipped. |
-| FR-18 | Sites come from repository variable `AGENTIC_E2E_NIGHTLY_SITES` (one URL per line). LLM credentials come from repository secrets (`ANTHROPIC_API_KEY`, or Bedrock `AWS_BEARER_TOKEN_BEDROCK` + variables for provider/region/model). Optional credentials JSON from secret `AGENTIC_E2E_CREDENTIALS_JSON` is written to `$RUNNER_TEMP` with mode `600` (outside the workspace) and passed via `AGENTIC_E2E_CREDENTIALS`; `--auth` is only added when it is present. |
+| FR-18 | Sites come from repository variable `AGENTIC_E2E_NIGHTLY_SITES`: one site per line, `<url> [extra CLI flags]` (e.g. `https://shop.example.com --auth --user alice`); blank lines and `#` comments are ignored; flags are word-split, never `eval`ed. LLM credentials come from repository secrets (`ANTHROPIC_API_KEY`, or Bedrock `AWS_BEARER_TOKEN_BEDROCK`) and variables (`AGENTIC_E2E_PROVIDER`, `AGENTIC_E2E_MODEL`, `AGENTICQA_BEDROCK_MODEL_ID`, `AWS_REGION`). Optional credentials JSON from secret `AGENTIC_E2E_CREDENTIALS_JSON` is written to `$RUNNER_TEMP` with mode `600` (outside the workspace), every string value in it is registered with `::add-mask::`, it is passed via `AGENTIC_E2E_CREDENTIALS`, and it is deleted at the end. |
 | FR-19 | Each site runs `pnpm cli all <url>`; results upload `data/` **excluding** `data/**/auth/**` (storageState) and `.agentic-e2e/`. Secrets are never echoed. `permissions: contents: read`. |
 
 ## 4. Secret handling (SPEC-009 guarantees preserved)

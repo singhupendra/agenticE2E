@@ -7,7 +7,6 @@ import vitestConfig from '../vitest.config.js';
 
 const root = packageRoot();
 const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const yamlOf = (rel: string): any => parse(read(rel));
 type Step = { name?: string; uses?: string; run?: string; with?: Record<string, unknown>; if?: string };
 
@@ -51,7 +50,7 @@ describe('CI workflow (SPEC-010 AC-5)', () => {
   });
 
   it('needs no repository secrets', () => {
-    expect(read('.github/workflows/ci.yml')).not.toMatch(/secrets\.(?!GITHUB_TOKEN)/);
+    expect(read('.github/workflows/ci.yml')).not.toMatch(/secrets\.(?!GITHUB_TOKEN\b)[A-Za-z_]/);
   });
 });
 
@@ -103,7 +102,14 @@ describe('repository hygiene files (SPEC-010 AC-7)', () => {
 
   it('documents the workflow in CONTRIBUTING.md', () => {
     const c = read('CONTRIBUTING.md');
-    for (const s of ['pnpm lint', 'pnpm format', 'pnpm test:coverage', 'pnpm check:secrets', 'AGENTIC_E2E_NIGHTLY', 'AGENTIC_E2E_NIGHTLY_SITES']) {
+    for (const s of [
+      'pnpm lint',
+      'pnpm format',
+      'pnpm test:coverage',
+      'pnpm check:secrets',
+      'AGENTIC_E2E_NIGHTLY',
+      'AGENTIC_E2E_NIGHTLY_SITES',
+    ]) {
       expect(c).toContain(s);
     }
   });
@@ -133,7 +139,6 @@ describe('package scripts and lockfile (SPEC-010 AC-8)', () => {
 
 describe('coverage thresholds (SPEC-010 AC-9)', () => {
   it('uses v8 coverage on src with thresholds at baseline minus a margin', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const cov = (vitestConfig as any).test.coverage;
     expect(cov.provider).toBe('v8');
     expect(cov.include).toEqual(['src/**/*.ts']);

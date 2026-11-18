@@ -31,7 +31,7 @@ export function listModels(provider: ProviderId): ModelInfo[] {
 }
 
 /** Models that reject `tool_choice: {type: "tool" | "any"}` with a 400. */
-const NO_FORCED_TOOL_CHOICE = /(^|[.\/])(anthropic\.)?claude-(sonnet-5-5|opus-5-5|fable-5-1|mythos-5-1)(\b|$|[-:@])/;
+const NO_FORCED_TOOL_CHOICE = /(^|[./])(anthropic\.)?claude-(sonnet-5-5|opus-5-5|fable-5-1|mythos-5-1)(\b|$|[-:@])/;
 
 export function supportsForcedToolChoice(model: string): boolean {
   return !NO_FORCED_TOOL_CHOICE.test(model);

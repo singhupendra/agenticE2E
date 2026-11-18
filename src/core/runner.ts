@@ -50,6 +50,7 @@ export function buildRunnerEnv(parent: NodeJS.ProcessEnv, extra: Record<string, 
   return { ...env, ...extra };
 }
 
+// eslint-disable-next-line no-control-regex -- matching the ESC byte of ANSI colour codes is the point
 const ANSI = /\u001b\[[0-9;]*m/g;
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 

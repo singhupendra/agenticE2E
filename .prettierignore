@@ -1,0 +1,11 @@
+# SPEC-010 FR-10
+node_modules/
+dist/
+web/dist/
+data/
+coverage/
+pnpm-lock.yaml
+.agentic-e2e/
+.auth/
+# Markdown is hand-formatted (spec tables) and edited by many branches
+**/*.md

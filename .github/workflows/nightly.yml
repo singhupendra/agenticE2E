@@ -1,0 +1,86 @@
+# SPEC-010 §3.5 — optional nightly run of the full pipeline against real sites.
+# DISABLED BY DEFAULT: the job is skipped unless the repository variable AGENTIC_E2E_NIGHTLY is 'true'.
+# Setup is documented in CONTRIBUTING.md ("Nightly runs").
+name: Nightly E2E
+
+on:
+  schedule:
+    - cron: '30 21 * * *' # 03:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: agentic-e2e all (configured sites)
+    if: ${{ vars.AGENTIC_E2E_NIGHTLY == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+
+      - name: Materialise credentials file (outside the workspace, mode 600)
+        env:
+          CREDENTIALS_JSON: ${{ secrets.AGENTIC_E2E_CREDENTIALS_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CREDENTIALS_JSON:-}" ]; then echo "No credentials secret; logged-in journeys are not available."; exit 0; fi
+          # GitHub masks the whole secret only; also mask every individual string value in it.
+          node -e 'const w=(v)=>typeof v==="string"?(v.length>=3&&console.log("::add-mask::"+v)):v&&typeof v==="object"&&Object.values(v).forEach(w);w(JSON.parse(process.env.CREDENTIALS_JSON))'
+          umask 077
+          file="$RUNNER_TEMP/agentic-e2e-credentials.json"
+          printf '%s' "$CREDENTIALS_JSON" > "$file"
+          chmod 600 "$file"
+          echo "AGENTIC_E2E_CREDENTIALS=$file" >> "$GITHUB_ENV"
+
+      - name: Run against configured sites
+        env:
+          SITES: ${{ vars.AGENTIC_E2E_NIGHTLY_SITES }}
+          AGENTIC_E2E_PROVIDER: ${{ vars.AGENTIC_E2E_PROVIDER }}
+          AGENTIC_E2E_MODEL: ${{ vars.AGENTIC_E2E_MODEL }}
+          AGENTICQA_BEDROCK_MODEL_ID: ${{ vars.AGENTICQA_BEDROCK_MODEL_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+        run: |
+          set -uo pipefail
+          if [ -z "${SITES:-}" ]; then echo "::error::Set the repository variable AGENTIC_E2E_NIGHTLY_SITES (one URL per line)."; exit 1; fi
+          status=0
+          # Each line: <url> [extra CLI flags], e.g. "https://shop.example.com --auth --user alice --max-journeys 5"
+          while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%%#*}"
+            read -r -a args <<< "$line"
+            [ "${#args[@]}" -eq 0 ] && continue
+            echo "::group::agentic-e2e all ${args[0]}"
+            pnpm cli all "${args[@]}" || status=1
+            echo "::endgroup::"
+          done <<< "$SITES"
+          exit "$status"
+
+      - name: Upload results (never the stored sessions)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nightly-e2e-data
+          path: |
+            data/
+            !data/**/auth/**
+            !data/**/storageState*.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Remove credentials file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/agentic-e2e-credentials.json"

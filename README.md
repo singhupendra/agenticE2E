@@ -415,6 +415,8 @@ pnpm test:run     # vitest (no network / API key needed; needs Chromium installe
 pnpm typecheck    # tsc for backend + web
 ```
 
+Lint, formatting, coverage thresholds, CI and the contribution workflow: see [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 Tests: unit tests per core module with a mocked LLM, plus an integration test that runs the full pipeline against a tiny in-test fixture site.
 
 ## Known limitations

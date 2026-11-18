@@ -178,6 +178,8 @@ export async function ensureSession(deps: AuthDeps, url: string, opts: { user?: 
   } catch (e) {
     if (e instanceof CredentialsError || e instanceof LLMBudgetError) throw e;
     const reason = deps.redactor.redact((e as Error).message.split('\n')[0]);
+    // SPEC-009: deliberately no `cause` — the original error may contain unredacted credential values.
+    // eslint-disable-next-line preserve-caught-error
     throw new Error(`Login failed for user "${user.name}" on ${meta.id}: ${reason}`);
   }
   deps.onProgress({ type: 'info', stage: 'auth', message: `Logged in as "${user.name}"; session saved` });
