@@ -11,8 +11,10 @@ export interface LogStream { write(line: string): void }
 export const REDACTED = '[REDACTED]';
 
 /** Field names whose values are always censored, wherever they appear (one or two levels deep). */
-const SENSITIVE_KEYS = ['password', 'passwd', 'apiKey', 'api_key', 'authorization', 'Authorization', 'token', 'accessToken', 'secret', 'secretAccessKey', 'sessionToken', 'cookie', 'E2E_PASSWORD'];
-const REDACT_PATHS = SENSITIVE_KEYS.flatMap((k) => [k, `*.${k}`, `*.*.${k}`]);
+const SENSITIVE_KEYS = ['password', 'passwd', 'apiKey', 'api_key', 'authorization', 'Authorization', 'token', 'accessToken', 'secret', 'secretAccessKey', 'sessionToken', 'cookie', 'E2E_PASSWORD', 'x-api-key', 'X-Api-Key', 'X-API-Key', 'x-auth-token'];
+/** pino/fast-redact paths: dot syntax for identifiers, bracket syntax for hyphenated keys (`*.*["x-api-key"]`). */
+const segment = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? `.${k}` : `[${JSON.stringify(k)}]`);
+const REDACT_PATHS = SENSITIVE_KEYS.flatMap((k) => ['', '*', '*.*'].map((prefix) => `${prefix}${segment(k)}`.replace(/^\./, '')));
 
 /** SPEC-013 FR-6: well-known secret shapes, scrubbed even when their value was never registered. */
 const SECRET_PATTERNS: [RegExp, string][] = [

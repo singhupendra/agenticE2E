@@ -74,6 +74,17 @@ describe('SPEC-013 structured logging', () => {
       expect(out).toContain('login failed for {{username}} with {{password}}');
     });
 
+    it('FR-6: hyphenated sensitive keys (x-api-key) are censored at any depth', () => {
+      const c = capture();
+      const log = createLogger({ level: 'info', format: 'json', stream: c.stream });
+      log.info({ 'x-api-key': 'top-k3y', headers: { 'x-api-key': 'hdr-k3y', 'X-Api-Key': 'mixed-k3y' }, req: { headers: { 'x-api-key': 'deep-k3y' } } }, 'call');
+      const out = c.lines.join('');
+      for (const v of ['top-k3y', 'hdr-k3y', 'mixed-k3y', 'deep-k3y']) expect(out, v).not.toContain(v);
+      const [line] = c.json();
+      expect(line.headers['x-api-key']).toBe('[REDACTED]');
+      expect(line.req.headers['x-api-key']).toBe('[REDACTED]');
+    });
+
     it('pretty output is redacted too', () => {
       const c = capture();
       createLogger({ level: 'info', format: 'pretty', stream: c.stream, redactor }).warn({ detail: 'pw s3cr3t-pw' }, `key ${env.ANTHROPIC_API_KEY}`);
