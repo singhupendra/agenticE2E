@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { detectFlaky, type FlakyInfo } from './reporting/flaky.js';
 import type { Store } from './storage.js';
 import type { Journey, JourneyStatus, SiteMeta, TestResult } from './types.js';
 
@@ -23,6 +24,8 @@ export interface TestCase {
   /** SPEC-009 */
   requiresAuth?: boolean;
   user?: string;
+  /** SPEC-011: present only when the run history marks the test flaky */
+  flaky?: FlakyInfo;
 }
 
 export interface SiteTestCases {
@@ -42,7 +45,9 @@ export function listTestCases(store: Store, siteId: string): SiteTestCases | nul
 
   // Latest stored result per journey; runs are ordered by id (= start time).
   const latest = new Map<string, { result: TestResult; run: ReturnType<Store['listRuns']>[number] }>();
-  for (const run of store.listRuns(siteId)) for (const result of run.results) latest.set(result.journeyId, { result, run });
+  const runs = store.listRuns(siteId);
+  const flaky = detectFlaky(runs, heals);
+  for (const run of runs) for (const result of run.results) latest.set(result.journeyId, { result, run });
 
   const tests = store.listTests(siteId).map((journeyId): TestCase => {
     const j = journeys.get(journeyId);
@@ -66,6 +71,7 @@ export function listTestCases(store: Store, siteId: string): SiteTestCases | nul
       journeyStatus: j?.status ?? 'unknown',
       lastRun,
       ...(j?.requiresAuth ? { requiresAuth: true, ...(j.user ? { user: j.user } : {}) } : {}),
+      ...(flaky[journeyId]?.flaky ? { flaky: flaky[journeyId] } : {}),
     };
   });
 

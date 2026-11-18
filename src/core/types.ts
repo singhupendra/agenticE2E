@@ -56,7 +56,8 @@ export interface TestResult {
 }
 export interface RunRecord {
   id: string;
-  kind: 'run' | 'heal-rerun';
+  /** SPEC-011: `retry` = a plain re-run of failing tests by `ci --retries` */
+  kind: 'run' | 'heal-rerun' | 'retry';
   startedAt: string;
   finishedAt: string;
   screenshots: ScreenshotMode;

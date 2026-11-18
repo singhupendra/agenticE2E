@@ -14,6 +14,7 @@ import { createContext, discover, generate, healSelected, run, runAll, type Cont
 import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases, type LastRun } from '../core/test-cases.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
+import { addReportOptions, commanderExitCode, registerCiCommand, reportCliConfig, reportRun } from './ci.js';
 
 const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
 
@@ -60,6 +61,7 @@ function cliConfig(o: Record<string, unknown>): PartialConfig {
     auth: o.auth ? true : undefined,
     authUser: o.user as string | undefined,
     credentialsFile: o.credentials as string | undefined,
+    ...reportCliConfig(o),
   };
 }
 
@@ -141,16 +143,19 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (g.result.failed.length) setExit(1);
     });
 
-  addCommon(program.command('run <url>').description('run stored tests'))
+  addReportOptions(addCommon(program.command('run <url>').description('run stored tests')))
     .option('--journey <ids...>', 'only these journey ids')
     .action(async (url: string, o) => {
       normalizeSite(url);
-      const r = await run(await ctxFrom(o), url, { journeyIds: o.journey });
+      const ctx = await ctxFrom(o);
+      const r = await run(ctx, url, { journeyIds: o.journey });
       printRun(r);
-      if (r.results.some((t) => t.status !== 'passed')) setExit(1);
+      const failed = r.results.some((t) => t.status !== 'passed');
+      await reportRun(ctx, url, { mode: 'run', runs: [r], exitCode: failed ? 1 : 0 });
+      if (failed) setExit(1);
     });
 
-  addCommon(program.command('heal <url> [testIds...]').description('re-run tests and self-heal the failing ones (all, the given test ids, or --failed)'))
+  addReportOptions(addCommon(program.command('heal <url> [testIds...]').description('re-run tests and self-heal the failing ones (all, the given test ids, or --failed)')))
     .option('--journey <ids...>', 'test/journey ids to heal (alias of the positional ids)')
     .option('--failed', 'only tests whose latest stored run outcome is failed (see list-test-cases)')
     .action(async (url: string, testIds: string[], o) => {
@@ -169,18 +174,23 @@ export function buildProgram(setExit: (code: number) => void): Command {
       for (const h of r.heals) console.log(`  ${healSummary(h)}`);
       const count = (o: HealTestOutcome) => r.results.filter((t) => t.outcome === o).length;
       console.log(`${r.results.length} test(s): ${count('healed')} healed, ${count('app_bug')} app_bug, ${count('flaky_or_environment')} flaky_or_environment, ${count('failed')} failed, ${count('already_passing')} already passing`);
-      if (r.heals.some((h) => h.outcome !== 'healed' && h.outcome !== 'flaky_or_environment')) setExit(1);
+      const healFailed = r.heals.some((h) => h.outcome !== 'healed' && h.outcome !== 'flaky_or_environment');
+      if (r.run) await reportRun(ctx, url, { mode: 'heal', runs: [r.run], heals: r.heals, exitCode: healFailed ? 1 : 0 });
+      if (healFailed) setExit(1);
     });
 
-  addCommon(program.command('all <url>').description('discover → select → generate → run → heal'))
+  addReportOptions(addCommon(program.command('all <url>').description('discover → select → generate → run → heal')))
     .option('--rediscover', 'ignore stored journeys and discover again')
     .option('--regenerate', 'regenerate code even if stored')
     .action(async (url: string, o) => {
       normalizeSite(url);
-      const r = await runAll(await ctxFrom(o), url, { rediscover: o.rediscover, regenerate: o.regenerate });
+      const ctx = await ctxFrom(o);
+      const r = await runAll(ctx, url, { rediscover: o.rediscover, regenerate: o.regenerate });
       console.log('\nFinal:');
       for (const f of r.final) console.log(`  ${f.status === 'passed' ? '✔' : '✗'} ${f.journeyId} ${f.status}${f.healed ? ' (healed)' : ''}`);
-      if (r.final.some((f) => f.status !== 'passed')) setExit(1);
+      const allFailed = r.final.some((f) => f.status !== 'passed');
+      await reportRun(ctx, url, { mode: 'all', runs: [r.run], heals: r.heals, exitCode: allFailed ? 1 : 0 });
+      if (allFailed) setExit(1);
     });
 
   program.command('auth-check <url>').description('log in with the credentials file and refresh the stored session (storageState) for a site')
@@ -248,11 +258,14 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (!listing.tests.length) return console.log(`No generated tests for ${site.id} yet. Run: agentic-e2e generate ${url}`);
       const lastRun = (r: LastRun) => (r.outcome === 'never_run' ? 'never run' : `${r.outcome} ${r.at ?? ''}`.trim());
       const anyAuth = listing.tests.some((t) => t.requiresAuth); // the AUTH column only appears once a test needs a login
-      const rows = [['JOURNEY', 'NAME', 'STATUS', ...(anyAuth ? ['AUTH'] : []), 'LAST RUN', 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, ...(anyAuth ? [t.requiresAuth ? t.user ?? 'yes' : '-'] : []), lastRun(t.lastRun), t.specFile])];
+      const anyFlaky = listing.tests.some((t) => t.flaky); // SPEC-011: the FLAKY column only appears once a test is flaky
+      const rows = [['JOURNEY', 'NAME', 'STATUS', ...(anyAuth ? ['AUTH'] : []), 'LAST RUN', ...(anyFlaky ? ['FLAKY'] : []), 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, ...(anyAuth ? [t.requiresAuth ? t.user ?? 'yes' : '-'] : []), lastRun(t.lastRun), ...(anyFlaky ? [t.flaky ? t.flaky.reasons.join('+') : '-'] : []), t.specFile])];
       const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
       console.log(`${site.id}: ${listing.tests.length} test${listing.tests.length === 1 ? '' : 's'}`);
       for (const r of rows) console.log(r.map((cell, c) => (c === r.length - 1 ? cell : cell.padEnd(widths[c]))).join('  '));
     });
+
+  registerCiCommand(program, { addCommon, cliConfig, logEvent, setExit });
 
   addCommon(program.command('serve').description('start the web UI + REST API'))
     .option('--port <n>', 'port', num, 4173)
@@ -276,7 +289,7 @@ export async function main(argv: string[]): Promise<number> {
     return exit;
   } catch (e) {
     const err = e as { code?: string; exitCode?: number; message: string };
-    if (err.code?.startsWith('commander.')) return err.exitCode ?? 1;
+    if (err.code?.startsWith('commander.')) return commanderExitCode(argv, err);
     console.error(`Error: ${err.message}`);
     return 1;
   }

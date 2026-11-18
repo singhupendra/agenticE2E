@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { PROVIDERS } from './llm/models.js';
+import { REPORT_FORMATS } from './reporting/model.js';
+import { NOTIFY_ON } from './reporting/notify.js';
 
 export const SCREENSHOT_MODES = ['off', 'on-failure', 'every-step', 'end-of-journey'] as const;
 
@@ -33,6 +35,14 @@ export const configSchema = z.object({
   auth: z.boolean().default(false),
   /** SPEC-009: which named user of the credentials file to use (names only; never a secret). */
   authUser: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, 'must be a user name from the credentials file').optional(),
+  /** SPEC-011: report formats written per run (CLI run/heal/all/ci); [] disables. */
+  reporters: z.array(z.enum(REPORT_FORMATS)).default([...REPORT_FORMATS]),
+  /** SPEC-011: extra directory the reports are also written to (e.g. for CI artifact upload). */
+  reportDir: z.string().min(1).optional(),
+  /** SPEC-011: `ci` re-runs failing tests up to this many times (no LLM). */
+  retries: z.number().int().min(0).max(10).default(0),
+  /** SPEC-011: when to send webhook/Slack notifications (URLs come from env only). */
+  notifyOn: z.enum(NOTIFY_ON).default('always'),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -47,6 +57,7 @@ const ENV_MAP: Record<string, { key: keyof Config; parse: (v: string) => unknown
   AGENTIC_E2E_FULL_PAGE: { key: 'fullPage', parse: (v) => v === 'true' || v === '1' },
   AGENTIC_E2E_DATA_DIR: { key: 'dataDir', parse: String },
   AGENTIC_E2E_CREDENTIALS: { key: 'credentialsFile', parse: String },
+  AGENTIC_E2E_REPORT_DIR: { key: 'reportDir', parse: String },
 };
 
 function stripUndefined<T extends object>(o: T | undefined): Partial<T> {
@@ -75,6 +86,7 @@ export function resolveConfig(opts: {
   }
   const cfg = parsed.data;
   cfg.dataDir = path.resolve(opts.cwd ?? process.cwd(), cfg.dataDir);
+  if (cfg.reportDir) cfg.reportDir = path.resolve(opts.cwd ?? process.cwd(), cfg.reportDir);
   if (cfg.credentialsFile) cfg.credentialsFile = path.resolve(opts.cwd ?? process.cwd(), cfg.credentialsFile);
   return cfg;
 }
