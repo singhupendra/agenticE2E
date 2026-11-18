@@ -36,6 +36,7 @@ describe('isForbiddenTrackedPath (SPEC-010 AC-1)', () => {
     // stored Playwright sessions inside a (committed) data dir: <dataDir>/sites/<host>/auth/<user>.json
     'e2e-data/sites/example.com/auth/alice.json',
     'sites/shop.test_8080/auth/admin.json',
+    'data/sites/shop/auth/alice.json',
   ])('forbids %s', (p) => expect(isForbiddenTrackedPath(p)).toBe(true));
 
   it.each([

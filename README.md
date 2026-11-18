@@ -16,7 +16,7 @@ Spec: [`specs/SPEC-001-agentic-e2e-platform.md`](specs/SPEC-001-agentic-e2e-plat
 
 ### Prerequisites
 
-- **Node.js 20+** and **[pnpm](https://pnpm.io/installation)**
+- **Node.js 22.12+** and **[pnpm](https://pnpm.io/installation)**
 - An LLM provider — one of:
   - **Anthropic API** key (`ANTHROPIC_API_KEY`), or
   - **Claude on Amazon Bedrock**: AWS credentials (env vars, profile/SSO, role, or `AWS_BEARER_TOKEN_BEDROCK`), a region, and Bedrock model access enabled for the model in your AWS account

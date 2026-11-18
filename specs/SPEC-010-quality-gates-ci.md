@@ -18,6 +18,7 @@
 | G-6 | The web UI build (`pnpm web:build`) is never exercised except by typecheck. |
 | G-7 | Integration tests need Chromium; CI must install it (`playwright install --with-deps chromium`). |
 | G-8 | No `packageManager` field, so CI cannot pin the pnpm version deterministically. |
+| G-10 | `engines.node` says `>=20`, but runtime dependency `commander` 15 and dev dependencies `vitest` 5 / `eslint` require Node `>=22.12`; the declared minimum was never true and never tested. |
 | G-9 | No Dependabot, CODEOWNERS, PR template or CONTRIBUTING guide; the spec-ID commit rule lives only in a personal CLAUDE.md. |
 
 ## 2. Non-goals
@@ -34,7 +35,7 @@
 | ID | Requirement |
 |----|-------------|
 | FR-1 | Triggers on `pull_request` and on `push` to `main`. Concurrency group per ref, cancelling superseded PR runs. Top-level `permissions: contents: read`. |
-| FR-2 | Job `checks` (ubuntu-latest): checkout → `pnpm/action-setup` (version from `packageManager`) → `actions/setup-node` with `node-version-file`/Node 20 and `cache: pnpm` → `pnpm install --frozen-lockfile` → `pnpm check:secrets` → `pnpm typecheck` → `pnpm lint` → `pnpm format:check` → Playwright Chromium install (`pnpm exec playwright install --with-deps chromium`, browsers cached by Playwright version) → `pnpm test:coverage` → `pnpm web:build`. |
+| FR-2 | Job `checks` (ubuntu-latest, matrix `node: ['22.12.0', '24']` = the `engines.node` minimum + current LTS, `fail-fast: false`): checkout → `pnpm/action-setup` (version from `packageManager`) → `actions/setup-node` with `node-version: ${{ matrix.node }}` and `cache: pnpm` → `pnpm install --frozen-lockfile` → `pnpm check:secrets` → `pnpm typecheck` → `pnpm lint` → `pnpm format:check` → Playwright Chromium install (`pnpm exec playwright install --with-deps chromium`, browsers cached by Playwright version) → `pnpm test:coverage` → `pnpm web:build`. |
 | FR-3 | Coverage report (`coverage/`) is uploaded as an artifact (`if: always()`); it contains source paths and counts only. |
 | FR-4 | Job `secret-scan` runs `gitleaks/gitleaks-action@v2` with full history (`fetch-depth: 0`) and `GITHUB_TOKEN`. `.gitleaks.toml` extends the default rules and allowlists only `credentials.example.json` (fake values). |
 | FR-5 | No step prints environment variables, secrets or credentials; CI needs **no** secrets (tests use the mock LLM). |
@@ -54,7 +55,7 @@
 | FR-9 | `eslint.config.js` (flat config): `@eslint/js` recommended + `typescript-eslint` recommended for `src`, `test`, `scripts`, `web/src`, config files; `eslint-plugin-react-hooks` for `web/src`; `eslint-config-prettier` last. Ignores `dist`, `web/dist`, `data`, `coverage`, `node_modules`. `pnpm lint` = `eslint .` with zero errors; `pnpm lint:fix` exists. |
 | FR-10 | `.prettierrc.json` matches the existing style (single quotes, semicolons, trailing commas, `printWidth` 120). `pnpm format` writes, `pnpm format:check` checks. `.prettierignore` excludes `pnpm-lock.yaml`, build output, `data/`, `coverage/`, and Markdown (`**/*.md` — hand-formatted tables, edited by many branches). |
 | FR-11 | Vitest coverage uses `@vitest/coverage-v8`, `include: ['src/**/*.ts']`, reporters `text-summary`, `html`, `json-summary`, `lcov`. Thresholds are the measured baseline minus ~2 points and never below 70 % lines: **lines 91, statements 90, branches 82, functions 88** (lines re-measured after the Prettier reformat, which spreads code over more lines: 93.7 %). `pnpm test:coverage` = `vitest run --coverage`. `pnpm test:run` keeps running without coverage. |
-| FR-12 | `package.json` has `"packageManager": "pnpm@10.33.0"`; the lockfile importer specifiers equal the `package.json` specifiers (fixes G-2). |
+| FR-12 | `package.json` `engines.node` is `>=22.12.0` (the real minimum, G-10) and the CI matrix contains exactly that version; it has `"packageManager": "pnpm@10.33.0"`; the lockfile importer specifiers equal the `package.json` specifiers (fixes G-2). |
 
 ### 3.4 Repository hygiene
 
@@ -82,11 +83,11 @@
 
 ## 5. Acceptance criteria (Given / When / Then)
 
-- **AC-1** Given `credentials.json`, `a/credentials.prod.json`, `x.credentials.json`, `storageState.json`, `e2e/storageState-admin.json`, `.agentic-e2e/credentials.json`, `.auth/u.json`, `a\\.auth\\u.json`, `e2e-data/sites/example.com/auth/alice.json`, When `isForbiddenTrackedPath` is called, Then each is `true`; Given `credentials.example.json`, `docs/credentials.example.json`, `src/core/credentials.ts`, `test/credentials.test.ts`, `auth.json`, `src/core/auth.ts`, `my.auth.ts`, `e2e-data/sites/example.com/tests/login.spec.ts`, Then each is `false`.
+- **AC-1** Given `credentials.json`, `a/credentials.prod.json`, `x.credentials.json`, `storageState.json`, `e2e/storageState-admin.json`, `.agentic-e2e/credentials.json`, `.auth/u.json`, `a\\.auth\\u.json`, `e2e-data/sites/example.com/auth/alice.json`, `data/sites/shop/auth/alice.json`, When `isForbiddenTrackedPath` is called, Then each is `true`; Given `credentials.example.json`, `docs/credentials.example.json`, `src/core/credentials.ts`, `test/credentials.test.ts`, `auth.json`, `src/core/auth.ts`, `my.auth.ts`, `e2e-data/sites/example.com/tests/login.spec.ts`, Then each is `false`.
 - **AC-2** Given a temporary git repo with a force-added `credentials.json` and `.auth/s.json` plus a tracked `credentials.example.json`, When `findForbiddenTrackedFiles` runs, Then it returns exactly the two forbidden paths; When the CLI runs there, Then it exits `1`, prints both paths and `git rm --cached`, and does not print the file contents.
 - **AC-3** Given a clean temp repo, When the CLI runs, Then it exits `0`; Given a non-repo directory, Then it exits `2`.
 - **AC-4** Given this repository, When `findForbiddenTrackedFiles` runs, Then the result is empty.
-- **AC-5** Given `ci.yml`, Then it triggers on `pull_request` and `push: branches: [main]`, has `permissions.contents: read`, and the `checks` job runs, in order, a frozen install with pnpm cache, `check:secrets`, `typecheck`, `lint`, `format:check`, a Playwright Chromium install, `test:coverage` and `web:build`; a `secret-scan` job uses `gitleaks/gitleaks-action` with `fetch-depth: 0`.
+- **AC-5** Given `ci.yml`, Then its `checks` matrix contains the `engines.node` minimum and at least one newer version, and it triggers on `pull_request` and `push: branches: [main]`, has `permissions.contents: read`, and the `checks` job runs, in order, a frozen install with pnpm cache, `check:secrets`, `typecheck`, `lint`, `format:check`, a Playwright Chromium install, `test:coverage` and `web:build`; a `secret-scan` job uses `gitleaks/gitleaks-action` with `fetch-depth: 0`.
 - **AC-6** Given `nightly.yml`, Then it has `schedule` + `workflow_dispatch` and no `pull_request`/`push`, its job is gated on `vars.AGENTIC_E2E_NIGHTLY == 'true'`, it runs `pnpm check:secrets` before `pnpm cli run … --data-dir "$DATA_DIR"` and never `all`/`discover`/`generate`/`heal`, credentials are written under `RUNNER_TEMP` with `chmod 600`, and the artifact uploads only `runs/`/`screenshots/` and excludes `auth` directories.
 - **AC-7** Given `dependabot.yml`, Then it has `npm` and `github-actions` updates. Given `CODEOWNERS`, Then it has `* @singhupendra`. Given the PR template, Then it contains a `SPEC-` field and checklist items for spec-first, tests-first and no secrets. Given `CONTRIBUTING.md`, Then it documents `pnpm lint`, `pnpm format`, `pnpm test:coverage`, `pnpm check:secrets` and the nightly variables.
 - **AC-8** Given `package.json`, Then scripts `lint`, `lint:fix`, `format`, `format:check`, `test:coverage`, `check:secrets` exist and `packageManager` starts with `pnpm@`; Given `pnpm-lock.yaml`, Then every importer specifier equals the `package.json` specifier.

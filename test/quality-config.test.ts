@@ -19,6 +19,17 @@ describe('CI workflow (SPEC-010 AC-5)', () => {
     expect(wf.permissions).toEqual({ contents: 'read' });
   });
 
+  it('tests the minimum supported Node version from package.json engines and the current LTS', () => {
+    const engines: string = JSON.parse(read('package.json')).engines.node;
+    const min = engines.match(/^>=(\d+\.\d+\.\d+)$/)?.[1];
+    expect(min, `engines.node should be ">=x.y.z", got ${engines}`).toBeTruthy();
+    const matrix: string[] = wf.jobs.checks.strategy.matrix.node.map(String);
+    expect(matrix).toContain(min);
+    expect(matrix.length).toBeGreaterThanOrEqual(2);
+    const setupNode = (wf.jobs.checks.steps as Step[]).find((s) => (s.uses ?? '').startsWith('actions/setup-node'));
+    expect(setupNode?.with?.['node-version']).toBe('${{ matrix.node }}');
+  });
+
   it('runs the quality gates in order', () => {
     const steps: Step[] = wf.jobs.checks.steps;
     const idx = (pred: (s: Step) => boolean, label: string) => {

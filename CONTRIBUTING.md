@@ -6,7 +6,7 @@ Thanks for helping. This repo is **spec-driven** and every PR goes through the s
 ## Setup
 
 ```bash
-pnpm install                              # Node 20+; pnpm version is pinned by "packageManager" in package.json
+pnpm install                              # Node 22.12+ (package.json engines); pnpm version is pinned by "packageManager" in package.json
 pnpm exec playwright install chromium     # needed by the integration tests
 ```
 
