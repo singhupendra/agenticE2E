@@ -22,7 +22,7 @@ export interface Job {
 
 /** Options a web client may override per job. dataDir/model-provider internals are deliberately excluded. */
 // SPEC-012: `environments` (header values may be secrets) is server-only; clients pick one by name with `env`.
-const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true, environments: true }).partial()
+const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true, environments: true, server: true }).partial()
   .extend({ awsProfile: configSchema.shape.awsProfile.unwrap().nullable().optional() }).strict();
 
 /** Effective config for a job: server config overlaid with the client's options. */

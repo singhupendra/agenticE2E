@@ -14,22 +14,36 @@ import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases } from '../core/test-cases.js';
 import { publicEnvironments } from '../core/scale/environments.js';
 import { JobManager, parseJobRequest } from './jobs.js';
+import { createStorageBackend, type StorageBackend } from '../core/storage/index.js';
+import { Lifecycle, setLifecycle } from './lifecycle.js';
+import { registerSecurity, type AuthOptions } from './security.js';
 
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain', '.webm': 'video/webm' };
 
-/** `awsEnv` is a test seam: the environment used to locate the AWS config/credentials files (default: process.env). */
-export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string; host?: string; awsEnv?: Record<string, string | undefined> }): Promise<FastifyInstance> {
-  const app = Fastify({ logger: false });
+/**
+ * `awsEnv` is a test seam: the environment used to locate the AWS config/credentials files (default: process.env).
+ * SPEC-014: `auth` defaults to no authentication (legacy, in-process use); `startServer` always passes an explicit mode.
+ * `storage` defaults to the filesystem backend on `config.dataDir`.
+ */
+export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string; host?: string; awsEnv?: Record<string, string | undefined>; auth?: AuthOptions; storage?: StorageBackend }): Promise<FastifyInstance> {
+  if (!opts.auth && opts.host && ['0.0.0.0', '::'].includes(opts.host)) throw new Error(`Refusing to serve on ${opts.host} without auth: pass an auth mode (API tokens)`);
+  const { server } = opts.config;
+  const app = Fastify({ logger: false, bodyLimit: server.bodyLimitBytes, trustProxy: server.trustProxy });
   const store = new Store(opts.config.dataDir);
+  const storage = opts.storage ?? createStorageBackend({ kind: 'filesystem', root: opts.config.dataDir });
   const jobs = new JobManager(opts.config, opts.llm);
+  const lifecycle = new Lifecycle({ activeJobs: () => jobs.list().filter((j) => j.status === 'running').length });
+  setLifecycle(app, lifecycle);
 
   // This server runs generated tests and spends LLM credits. Defences:
   //  1. Host allowlist on every request (stops DNS rebinding: a rebound page has Host == Origin == attacker.com).
   //  2. Mutating requests must be application/json (cannot be sent cross-site without a CORS preflight, which we never grant).
   //  3. If an Origin is sent on a mutating request it must match Host.
   const allowedHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
-  if (opts.host && !['0.0.0.0', '::'].includes(opts.host)) allowedHosts.add(opts.host.toLowerCase().replace(/^([^[].*:.*)$/, '[$1]'));
+  const hostKey = (h: string) => h.toLowerCase().replace(/^([^[].*:.*)$/, '[$1]');
+  if (opts.host && !['0.0.0.0', '::'].includes(opts.host)) allowedHosts.add(hostKey(opts.host));
+  for (const h of server.allowedHosts) allowedHosts.add(hostKey(h)); // SPEC-014: deployments behind a hostname
   const hostnameOf = (hostHeader: string | undefined) => {
     try { return new URL(`http://${hostHeader ?? ''}`).hostname.toLowerCase(); } catch { return ''; }
   };
@@ -45,6 +59,10 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     }
   });
 
+  // SPEC-014: helmet, rate limits, auth (tokens / session cookie / insecure-local), roles, /healthz, /readyz, /api/session.
+  // Registered before the routes so per-route rate-limit config applies.
+  await registerSecurity(app, { config: opts.config, auth: opts.auth ?? { mode: 'none' }, lifecycle, storage });
+
   const siteOr404 = (site: string, reply: { code: (n: number) => { send: (b: unknown) => unknown } }) => {
     try {
       store.siteDir(site);
@@ -59,7 +77,7 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
 
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
-    const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, environments, ...pub } = opts.config;
+    const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, server: _s, environments, ...pub } = opts.config;
     return { ...pub, environments: publicEnvironments(environments) }; // SPEC-012: header names only, never values
   });
   app.get<{ Querystring: { provider?: string } }>('/api/models', async (req, reply) => {
@@ -152,8 +170,10 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
       const abs = store.resolveFile(meta.id, rel);
       const mime = MIME[path.extname(abs).toLowerCase()];
       if (!mime) return reply.code(403).send({ error: 'File type not served' });
-      if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return reply.code(404).send({ error: 'Not found' });
-      return reply.header('content-type', mime).header('x-content-type-options', 'nosniff').send(fs.createReadStream(abs));
+      // SPEC-014: read through the storage backend (key relative to the data dir).
+      const stream = await storage.createReadStream(path.relative(opts.config.dataDir, abs).split(path.sep).join('/'));
+      if (!stream) return reply.code(404).send({ error: 'Not found' });
+      return reply.header('content-type', mime).header('x-content-type-options', 'nosniff').send(stream);
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
     }

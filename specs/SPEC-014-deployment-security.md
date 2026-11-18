@@ -60,7 +60,7 @@
 | FR-7 | Credentials: `Authorization: Bearer <token>` **or** the session cookie (FR-8). |
 | FR-8 | `POST /api/session` with a Bearer token (or `{ "token" }` body) creates an in-memory session (random 32-byte id, TTL `server.sessionTtlMs`, default 12 h) and sets cookie `ae2e_session` `HttpOnly; SameSite=Strict; Path=/` (+`Secure` over https). `GET /api/session` → `{ authRequired, authenticated, name?, role? }`. `DELETE /api/session` revokes it. This is how the web UI authenticates `EventSource`, images and downloads. CSRF stays covered by SameSite=Strict + the existing JSON content type + Origin checks. |
 | FR-9 | **Insecure local mode** is explicit: `serve --insecure-local` (or `startServer({ auth: { mode: 'insecure-local' } })`). It is refused unless the bind host is loopback (`127.0.0.1`, `localhost`, `::1`). Every request is then treated as `admin`; startup prints a warning. Without tokens and without `--insecure-local`, `serve` refuses to start with an error explaining both options. |
-| FR-10 | `buildApp()` without an `auth` option keeps the previous behaviour (no auth) **only** for loopback hosts, so in-process callers/tests are unaffected; with a non-loopback host it throws. `startServer` always passes an explicit mode. |
+| FR-10 | `buildApp()` without an `auth` option keeps the previous behaviour (no auth, Host allowlist only) so in-process callers/tests are unaffected, but throws for a wildcard bind host (`0.0.0.0`, `::`). `startServer` (used by `serve` and the container) always passes an explicit mode and enforces FR-9. |
 
 ### 3.3 Hardening (`src/server/security.ts`)
 
@@ -132,7 +132,7 @@
 **Modes**
 - AC-12: Given no tokens and no `--insecure-local`, when the server starts, then it fails with a message naming `--insecure-local` and `token create`.
 - AC-13: Given `--insecure-local` with host `0.0.0.0`, when the server starts, then it fails (loopback only); with `127.0.0.1`, any request is admin and `GET /api/session` reports `authRequired:false`.
-- AC-14: Given `buildApp` without `auth` and host `0.0.0.0`, then it throws; with no host it behaves as before (existing tests pass unchanged).
+- AC-14: Given `buildApp` without `auth` and host `0.0.0.0`, then it throws; with no host (or a named host) it behaves as before (existing tests pass unchanged).
 
 **Hardening**
 - AC-15: Given any response, then it has `content-security-policy` containing `frame-ancestors 'none'`, `x-content-type-options: nosniff` and `referrer-policy: no-referrer`.
