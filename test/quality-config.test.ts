@@ -68,13 +68,32 @@ describe('nightly workflow (SPEC-010 AC-6)', () => {
     for (const j of jobs) expect(j.if).toContain("vars.AGENTIC_E2E_NIGHTLY == 'true'");
   });
 
+  const steps: Step[] = Object.values(wf.jobs).flatMap((j) => (j as { steps: Step[] }).steps);
+
+  it('replays stored tests with `agentic-e2e run` from a committed data dir, after the tracked-secrets check', () => {
+    const runIdx = steps.findIndex((s) => /pnpm cli run "\$\{args\[@\]\}" --data-dir "\$DATA_DIR"/.test(s.run ?? ''));
+    const checkIdx = steps.findIndex((s) => (s.run ?? '').includes('pnpm check:secrets'));
+    expect(runIdx).toBeGreaterThan(-1);
+    expect(checkIdx).toBeGreaterThan(-1);
+    expect(checkIdx).toBeLessThan(runIdx);
+    expect(text).not.toMatch(/pnpm cli (all|discover|generate|heal)\b/);
+    expect(text).toContain('vars.AGENTIC_E2E_NIGHTLY_DATA_DIR');
+  });
+
   it('writes credentials outside the workspace with mode 600 and never uploads sessions', () => {
     expect(text).toContain('RUNNER_TEMP');
     expect(text).toContain('chmod 600');
     expect(wf.permissions).toEqual({ contents: 'read' });
-    const steps: Step[] = Object.values(wf.jobs).flatMap((j) => (j as { steps: Step[] }).steps);
     const upload = steps.find((s) => (s.uses ?? '').startsWith('actions/upload-artifact'));
-    expect(String(upload?.with?.path)).toMatch(/!data\/\*\*\/auth\/\*\*/);
+    const paths = String(upload?.with?.path)
+      .split('\n')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    // explicit allow-list (runs + screenshots) plus an exclusion for stored sessions
+    expect(paths.filter((p) => !p.startsWith('!')).every((p) => /\/sites\/\*\/(runs|screenshots)\/$/.test(p))).toBe(
+      true,
+    );
+    expect(paths).toContain('!${{ env.DATA_DIR }}/**/auth/**');
     expect(text).not.toMatch(/echo[^\n]*secrets\./);
   });
 });
@@ -109,6 +128,8 @@ describe('repository hygiene files (SPEC-010 AC-7)', () => {
       'pnpm check:secrets',
       'AGENTIC_E2E_NIGHTLY',
       'AGENTIC_E2E_NIGHTLY_SITES',
+      'AGENTIC_E2E_NIGHTLY_DATA_DIR',
+      'pnpm cli run',
     ]) {
       expect(c).toContain(s);
     }

@@ -43,7 +43,7 @@
 
 | ID | Requirement |
 |----|-------------|
-| FR-6 | `isForbiddenTrackedPath(p)` is true for: any basename matching `credentials*.json` **except** `credentials.example.json`; any basename matching `*.credentials.json`; any basename matching `storageState*.json`; any path with a `.agentic-e2e` or `.auth` directory segment. Backslashes are normalised. |
+| FR-6 | `isForbiddenTrackedPath(p)` is true for: any basename matching `credentials*.json` **except** `credentials.example.json`; any basename matching `*.credentials.json`; any basename matching `storageState*.json`; any path with a `.agentic-e2e` or `.auth` directory segment; any `…/sites/<host>/auth/<file>` (stored sessions inside a data directory, e.g. a committed nightly data dir). Backslashes are normalised. |
 | FR-7 | `findForbiddenTrackedFiles(cwd)` lists `git ls-files -z` output in `cwd` filtered by FR-6. |
 | FR-8 | The CLI exits `1` and prints each offending **path** (never file contents) with remediation (`git rm --cached <path>`, rotate the secrets); exits `0` with a one-line OK otherwise. Outside a git repo it exits `2` with an error. |
 
@@ -69,9 +69,9 @@
 
 | ID | Requirement |
 |----|-------------|
-| FR-17 | Triggers: `schedule` (daily) and `workflow_dispatch`; never `pull_request`/`push`. The job runs only if repository variable `AGENTIC_E2E_NIGHTLY == 'true'` (or on manual dispatch with that variable set) — unset ⇒ skipped. |
-| FR-18 | Sites come from repository variable `AGENTIC_E2E_NIGHTLY_SITES`: one site per line, `<url> [extra CLI flags]` (e.g. `https://shop.example.com --auth --user alice`); blank lines and `#` comments are ignored; flags are word-split, never `eval`ed. LLM credentials come from repository secrets (`ANTHROPIC_API_KEY`, or Bedrock `AWS_BEARER_TOKEN_BEDROCK`) and variables (`AGENTIC_E2E_PROVIDER`, `AGENTIC_E2E_MODEL`, `AGENTICQA_BEDROCK_MODEL_ID`, `AWS_REGION`). Optional credentials JSON from secret `AGENTIC_E2E_CREDENTIALS_JSON` is written to `$RUNNER_TEMP` with mode `600` (outside the workspace), every string value in it is registered with `::add-mask::`, it is passed via `AGENTIC_E2E_CREDENTIALS`, and it is deleted at the end. |
-| FR-19 | Each site runs `pnpm cli all <url>`; results upload `data/` **excluding** `data/**/auth/**` (storageState) and `.agentic-e2e/`. Secrets are never echoed. `permissions: contents: read`. |
+| FR-17 | Triggers: `schedule` (daily) and `workflow_dispatch`; never `pull_request`/`push`. The job runs only if repository variable `AGENTIC_E2E_NIGHTLY == 'true'` — unset ⇒ skipped. |
+| FR-18 | It **replays stored tests** with `pnpm cli run <url> --data-dir "$DATA_DIR"` (no discover/generate/heal, no LLM tokens). Because `data/` is gitignored, tests come from a committed data directory `AGENTIC_E2E_NIGHTLY_DATA_DIR` (default `e2e-data`); a missing `<dir>/sites` is a clear error. Sites come from variable `AGENTIC_E2E_NIGHTLY_SITES`: one per line, `<url> [extra run flags]` (e.g. `--auth --user alice`); blank lines and `#` comments ignored; flags are word-split, never `eval`ed. `pnpm check:secrets` runs before any test. |
+| FR-19 | Optional secret `AGENTIC_E2E_CREDENTIALS_JSON` is written to `$RUNNER_TEMP` with mode `600` (outside the workspace), every string value in it is registered with `::add-mask::`, it is passed via `AGENTIC_E2E_CREDENTIALS`, and it is deleted at the end. LLM secrets (`ANTHROPIC_API_KEY` / `AWS_BEARER_TOKEN_BEDROCK` + provider variables) are passed only for login-form detection on hint-less `--auth` sites. The artifact uploads only `<dir>/sites/*/runs/` and `screenshots/`, with `**/auth/**` excluded. `permissions: contents: read`. Any failing test fails the job. |
 
 ## 4. Secret handling (SPEC-009 guarantees preserved)
 
@@ -82,12 +82,12 @@
 
 ## 5. Acceptance criteria (Given / When / Then)
 
-- **AC-1** Given `credentials.json`, `a/credentials.prod.json`, `x.credentials.json`, `storageState.json`, `e2e/storageState-admin.json`, `.agentic-e2e/credentials.json`, `.auth/u.json`, `a\\.auth\\u.json`, When `isForbiddenTrackedPath` is called, Then each is `true`; Given `credentials.example.json`, `docs/credentials.example.json`, `src/core/credentials.ts`, `test/credentials.test.ts`, `auth.json`, `src/core/auth.ts`, `my.auth.ts`, Then each is `false`.
+- **AC-1** Given `credentials.json`, `a/credentials.prod.json`, `x.credentials.json`, `storageState.json`, `e2e/storageState-admin.json`, `.agentic-e2e/credentials.json`, `.auth/u.json`, `a\\.auth\\u.json`, `e2e-data/sites/example.com/auth/alice.json`, When `isForbiddenTrackedPath` is called, Then each is `true`; Given `credentials.example.json`, `docs/credentials.example.json`, `src/core/credentials.ts`, `test/credentials.test.ts`, `auth.json`, `src/core/auth.ts`, `my.auth.ts`, `e2e-data/sites/example.com/tests/login.spec.ts`, Then each is `false`.
 - **AC-2** Given a temporary git repo with a force-added `credentials.json` and `.auth/s.json` plus a tracked `credentials.example.json`, When `findForbiddenTrackedFiles` runs, Then it returns exactly the two forbidden paths; When the CLI runs there, Then it exits `1`, prints both paths and `git rm --cached`, and does not print the file contents.
 - **AC-3** Given a clean temp repo, When the CLI runs, Then it exits `0`; Given a non-repo directory, Then it exits `2`.
 - **AC-4** Given this repository, When `findForbiddenTrackedFiles` runs, Then the result is empty.
 - **AC-5** Given `ci.yml`, Then it triggers on `pull_request` and `push: branches: [main]`, has `permissions.contents: read`, and the `checks` job runs, in order, a frozen install with pnpm cache, `check:secrets`, `typecheck`, `lint`, `format:check`, a Playwright Chromium install, `test:coverage` and `web:build`; a `secret-scan` job uses `gitleaks/gitleaks-action` with `fetch-depth: 0`.
-- **AC-6** Given `nightly.yml`, Then it has `schedule` + `workflow_dispatch` and no `pull_request`/`push`, its job is gated on `vars.AGENTIC_E2E_NIGHTLY == 'true'`, credentials are written under `RUNNER_TEMP` with `chmod 600`, and the artifact path excludes `auth` directories.
+- **AC-6** Given `nightly.yml`, Then it has `schedule` + `workflow_dispatch` and no `pull_request`/`push`, its job is gated on `vars.AGENTIC_E2E_NIGHTLY == 'true'`, it runs `pnpm check:secrets` before `pnpm cli run … --data-dir "$DATA_DIR"` and never `all`/`discover`/`generate`/`heal`, credentials are written under `RUNNER_TEMP` with `chmod 600`, and the artifact uploads only `runs/`/`screenshots/` and excludes `auth` directories.
 - **AC-7** Given `dependabot.yml`, Then it has `npm` and `github-actions` updates. Given `CODEOWNERS`, Then it has `* @singhupendra`. Given the PR template, Then it contains a `SPEC-` field and checklist items for spec-first, tests-first and no secrets. Given `CONTRIBUTING.md`, Then it documents `pnpm lint`, `pnpm format`, `pnpm test:coverage`, `pnpm check:secrets` and the nightly variables.
 - **AC-8** Given `package.json`, Then scripts `lint`, `lint:fix`, `format`, `format:check`, `test:coverage`, `check:secrets` exist and `packageManager` starts with `pnpm@`; Given `pnpm-lock.yaml`, Then every importer specifier equals the `package.json` specifier.
 - **AC-9** Given `vitest.config.ts`, Then coverage provider is `v8`, includes `src/**/*.ts`, and thresholds are ≥ 70 lines and equal to FR-11.

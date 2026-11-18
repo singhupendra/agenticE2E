@@ -33,6 +33,9 @@ describe('isForbiddenTrackedPath (SPEC-010 AC-1)', () => {
     '.agentic-e2e/notes.txt',
     '.auth/u.json',
     'a\\.auth\\u.json',
+    // stored Playwright sessions inside a (committed) data dir: <dataDir>/sites/<host>/auth/<user>.json
+    'e2e-data/sites/example.com/auth/alice.json',
+    'sites/shop.test_8080/auth/admin.json',
   ])('forbids %s', (p) => expect(isForbiddenTrackedPath(p)).toBe(true));
 
   it.each([
@@ -44,6 +47,9 @@ describe('isForbiddenTrackedPath (SPEC-010 AC-1)', () => {
     'src/core/auth.ts',
     'my.auth.ts',
     'test/helpers/credentials.ts',
+    'e2e-data/sites/example.com/tests/login.spec.ts',
+    'e2e-data/sites/example.com/journeys.json',
+    'docs/auth/overview.json',
   ])('allows %s', (p) => expect(isForbiddenTrackedPath(p)).toBe(false));
 });
 

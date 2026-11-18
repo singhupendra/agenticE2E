@@ -15,6 +15,10 @@ export function isForbiddenTrackedPath(p: string): boolean {
   const segments = p.replace(/\\/g, '/').split('/').filter(Boolean);
   const base = segments.at(-1) ?? '';
   if (segments.slice(0, -1).some((s) => FORBIDDEN_DIRS.has(s))) return true;
+  // <dataDir>/sites/<host>/auth/<user>.json — stored Playwright sessions (e.g. in a committed nightly data dir)
+  for (let i = 0; i + 2 < segments.length - 1; i++) {
+    if (segments[i] === 'sites' && segments[i + 2] === 'auth') return true;
+  }
   if (ALLOWED_BASENAMES.has(base)) return false;
   return FORBIDDEN_BASENAMES.some((re) => re.test(base));
 }

@@ -59,19 +59,30 @@ in the PR description. `web/` is covered by typecheck + build (there is no brows
 
 ## Nightly runs (optional, disabled by default)
 
-`.github/workflows/nightly.yml` runs `agentic-e2e all` against real sites every night (03:00 IST) and on manual
-dispatch. It is **skipped** unless you opt in. To enable it, in *Settings → Secrets and variables → Actions*:
+`.github/workflows/nightly.yml` replays the **stored** tests with `agentic-e2e run <url>` (`pnpm cli run <url>`) against
+real sites every night (03:00 IST) and on manual dispatch. It does not discover, generate or heal, so it costs no LLM
+tokens. It is **skipped** unless you opt in.
+
+**1. Commit the tests.** Stored tests normally live in the gitignored `data/`, so generate them into a separate data
+directory and commit that directory:
+
+```bash
+pnpm cli all https://shop.example.com --data-dir e2e-data    # or discover + generate
+git add e2e-data/sites/*/{site.json,journeys.json,tests}     # never auth/ (sessions); runs/ and screenshots/ are optional noise
+pnpm check:secrets                                           # fails if e2e-data/sites/*/auth/* got staged and committed
+```
+
+**2. Configure** in *Settings → Secrets and variables → Actions*:
 
 | Kind | Name | Value |
 |------|------|-------|
 | Variable | `AGENTIC_E2E_NIGHTLY` | `true` (anything else, or unset, keeps the workflow disabled) |
-| Variable | `AGENTIC_E2E_NIGHTLY_SITES` | One site per line: `<url> [extra CLI flags]`, e.g. `https://shop.example.com --max-journeys 5` or `https://app.example.com --auth --user alice`. `#` starts a comment. |
-| Secret | `ANTHROPIC_API_KEY` | Anthropic provider (default) |
-| Secret | `AWS_BEARER_TOKEN_BEDROCK` | Bedrock API key, with variables `AGENTIC_E2E_PROVIDER=bedrock`, `AWS_REGION`, optionally `AGENTICQA_BEDROCK_MODEL_ID` |
-| Variable | `AGENTIC_E2E_PROVIDER`, `AGENTIC_E2E_MODEL` | Optional provider / model overrides |
-| Secret | `AGENTIC_E2E_CREDENTIALS_JSON` | Optional: the full credentials file (same format as `credentials.example.json`) for `--auth` sites. Prefer dedicated low-privilege test accounts. |
+| Variable | `AGENTIC_E2E_NIGHTLY_SITES` | One site per line: `<url> [extra run flags]`, e.g. `https://shop.example.com` or `https://app.example.com --auth --user alice --journey checkout`. `#` starts a comment. |
+| Variable | `AGENTIC_E2E_NIGHTLY_DATA_DIR` | Optional: the committed data directory (default `e2e-data`) |
+| Secret | `AGENTIC_E2E_CREDENTIALS_JSON` | For `--auth` sites: the full credentials file (same format as `credentials.example.json`). Prefer dedicated low-privilege test accounts. |
+| Secret | `ANTHROPIC_API_KEY` or `AWS_BEARER_TOKEN_BEDROCK` | Only if an `--auth` site has no `login` hints (the LLM then locates the login form). Bedrock also uses variables `AGENTIC_E2E_PROVIDER=bedrock`, `AWS_REGION`, optionally `AGENTICQA_BEDROCK_MODEL_ID` / `AGENTIC_E2E_MODEL`. |
 
-The credentials secret is written to `$RUNNER_TEMP` with mode `600` (outside the checkout), each value in it is masked in
-the logs, and it is deleted at the end. Run results (`data/`) are uploaded as an artifact **without** stored sessions
-(`data/**/auth/**`). Because stored tests live in the gitignored `data/` directory, each nightly run discovers and
-generates from scratch, which costs LLM tokens — keep `--max-journeys` small.
+The workflow runs `pnpm check:secrets` first. The credentials secret is written to `$RUNNER_TEMP` with mode `600`
+(outside the checkout), each value in it is masked in the logs, and it is deleted at the end. Only `runs/` and
+`screenshots/` of each site are uploaded as an artifact, never stored sessions (`auth/`). A failing test fails the
+workflow.
