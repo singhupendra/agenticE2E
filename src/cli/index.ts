@@ -15,7 +15,7 @@ import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases, type LastRun } from '../core/test-cases.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
 import { addReportOptions, commanderExitCode, registerCiCommand, reportCliConfig, reportRun } from './ci.js';
-import { addScaleOptions, registerScaleCommands, scaleCliConfig } from './scale.js';
+import { addJourneyTagOptions, addScaleOptions, applyJourneyTagOptions, scaleCliConfig } from './scale.js';
 
 const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
 
@@ -79,7 +79,7 @@ async function ctxFrom(o: Record<string, unknown>): Promise<Context> {
 
 function printJourneys(journeys: Journey[]) {
   for (const j of journeys) {
-    console.log(`  [${j.status.padEnd(8)}] ${j.id}  (${j.priority}${j.rank ? `, rank ${j.rank}` : ''})\n      ${j.name} — ${j.goal}`);
+    console.log(`  [${j.status.padEnd(8)}] ${j.id}  (${j.priority}${j.rank ? `, rank ${j.rank}` : ''})\n      ${j.name} — ${j.goal}${j.tags.length ? `\n      tags: ${j.tags.join(', ')}` : ''}`);
     j.steps.forEach((s, i) => console.log(`        ${i + 1}. ${s}`));
   }
 }
@@ -117,7 +117,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
       printJourneys(d.journeys);
     });
 
-  addCommon(program.command('journeys <url>').description('show, approve, reject or edit stored journeys'))
+  addJourneyTagOptions(addCommon(program.command('journeys <url>').description('show, approve, reject or edit stored journeys (incl. tags)')))
     .option('--approve <ids...>', 'approve journeys by id')
     .option('--reject <ids...>', 'reject journeys by id')
     .option('--approve-all', 'approve every non-rejected journey')
@@ -131,7 +131,9 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (o.approve) journeys = setStatus(journeys, o.approve, 'approved');
       if (o.reject) journeys = setStatus(journeys, o.reject, 'rejected');
       if (o.approveAll) journeys = journeys.map((j) => (j.status === 'rejected' ? j : { ...j, status: 'approved' as const }));
-      if (o.approve || o.reject || o.approveAll) store.saveJourneys(site, journeys);
+      const tagged = applyJourneyTagOptions(journeys, o); // SPEC-012
+      if (tagged) journeys = tagged;
+      if (o.approve || o.reject || o.approveAll || tagged) store.saveJourneys(site, journeys);
       if (o.edit) journeys = editJourneys(store, site, journeys);
       printJourneys(journeys);
     });

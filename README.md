@@ -268,8 +268,9 @@ agentic-e2e run https://shop.example --env staging
 agentic-e2e run https://shop.example --tag smoke critical
 agentic-e2e heal https://shop.example --failed --env staging --grep checkout
 agentic-e2e list-test-cases https://shop.example --env prod --tag critical
-# edit tags (the planner assigns smoke/regression/critical by priority, and destructive)
-agentic-e2e tags https://shop.example checkout --add critical --remove regression
+# edit tags with the journeys command or the web journeys tab (the planner assigns smoke/regression/critical by priority, and destructive)
+agentic-e2e journeys https://shop.example --add-tags checkout=critical --remove-tags checkout=regression
+agentic-e2e journeys https://shop.example --set-tags '*=regression' home=smoke,critical
 # timeouts and artifacts
 agentic-e2e run https://shop.example --timeout 30000 --global-timeout 600000 --trace on-failure --video retain-on-failure
 ```

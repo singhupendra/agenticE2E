@@ -147,7 +147,7 @@ describe('SPEC-012 history per env/target (AC-17)', () => {
     expect(listTestCases(store, SITE, { tag: ['regression'] })!.tests.map((t) => t.journeyId)).toEqual(['y']);
   });
 
-  it('CLI: list-test-cases --env / --tag / --grep, and tags command', async () => {
+  it('CLI: list-test-cases --env / --tag / --grep, and journeys tag editing', async () => {
     const out: string[] = [];
     const log = vi.spyOn(console, 'log').mockImplementation((...a) => { out.push(a.join(' ')); });
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -161,14 +161,17 @@ describe('SPEC-012 history per env/target (AC-17)', () => {
       expect(out.join('\n')).toMatch(/TAGS/);
       expect(out.join('\n')).not.toMatch(/\by\b.*regression/);
       out.length = 0;
-      expect(await cli('tags', URL_, 'x', '--add', 'Critical', '--remove', 'smoke')).toBe(0);
+      expect(await cli('journeys', URL_, '--add-tags', 'x=Critical', '--remove-tags', 'x=smoke')).toBe(0);
       expect(store.loadJourneys(SITE)!.find((x) => x.id === 'x')!.tags).toEqual(['critical']);
       expect(store.loadJourneys(SITE)!.find((x) => x.id === 'y')!.tags).toEqual(['regression']);
-      expect(await cli('tags', URL_, 'zz', '--add', 'a')).toBe(1);
-      expect(await cli('tags', URL_, 'x', '--add', '!!')).toBe(1);
-      out.length = 0;
-      expect(await cli('tags', URL_)).toBe(0);
-      expect(out.join('\n')).toMatch(/x\s+critical/);
+      expect(out.join('\n')).toMatch(/tags: critical/);
+      expect(await cli('journeys', URL_, '--add-tags', 'zz=a')).toBe(1);
+      expect(await cli('journeys', URL_, '--add-tags', 'x=!!')).toBe(1);
+      expect(await cli('journeys', URL_, '--add-tags', 'x=Bad Tag')).toBe(1);
+      expect(await cli('journeys', URL_, '--add-tags', 'nonsense')).toBe(1);
+      expect(store.loadJourneys(SITE)!.find((x) => x.id === 'x')!.tags).toEqual(['critical']);
+      expect(await cli('journeys', URL_, '--set-tags', '*=smoke', 'y=regression,critical')).toBe(0);
+      expect(store.loadJourneys(SITE)!.map((x) => x.tags)).toEqual([['smoke'], ['regression', 'critical']]);
     } finally { log.mockRestore(); err.mockRestore(); }
   });
 });
@@ -176,12 +179,27 @@ describe('SPEC-012 history per env/target (AC-17)', () => {
 describe('SPEC-012 server (AC-18)', () => {
   let app: FastifyInstance;
   afterEach(async () => { await app?.close(); });
+  it('review: bad env/device/shard job options are a 400 and do not block later jobs for the site', async () => {
+    const config = resolveConfig({ file: { dataDir, environments: { staging: { baseUrl: site.url, headers: { authorization: '${SCALE_UNSET_FOR_JOB}' } } } } as never, env: {} });
+    app = await buildApp({ config, webDir: path.join(dataDir, 'no-web') });
+    for (const options of [{ env: 'nope' }, { devices: ['iPhone 99'] }, { shard: '0/2' }, { env: 'staging' }]) {
+      const r = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: URL_, options } });
+      expect(r.statusCode, JSON.stringify(options)).toBe(400);
+      expect(r.body).not.toContain('SCALE_UNSET_FOR_JOB');
+    }
+    const ok = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'run', url: URL_ } });
+    expect(ok.statusCode).toBe(202);
+  });
+
   it('never returns env header values and ignores client-provided environments', async () => {
     const config = resolveConfig({ file: { dataDir, environments: { staging: { baseUrl: 'https://stg.example.test', headers: { authorization: 'Bearer srv-secret-123' } } } } as never, env: {} });
     app = await buildApp({ config, webDir: path.join(dataDir, 'no-web') });
     const body = (await app.inject('/api/config')).body;
     expect(body).not.toContain('srv-secret-123');
     expect(JSON.parse(body).environments).toEqual({ staging: { baseUrl: 'https://stg.example.test', readOnly: false, headers: ['authorization'] } });
+    const put = await app.inject({ method: 'PUT', url: `/api/sites/${SITE}/journeys`, payload: [j('x', { tags: [' Smoke ', 'smoke', 'Critical'] })] });
+    expect(put.statusCode).toBe(200);
+    expect(store.loadJourneys(SITE)![0].tags).toEqual(['smoke', 'critical']);
     expect(parseJobRequest({ action: 'run', url: URL_, options: { environments: { x: { baseUrl: 'https://evil.test' } } } }).options).toEqual({});
     expect(mergeJobConfig(config, parseJobRequest({ action: 'run', url: URL_, options: JSON.parse(body) }).options).environments).toEqual(config.environments);
     expect(parseJobRequest({ action: 'run', url: URL_, options: { env: 'staging', browsers: ['firefox'], tag: ['smoke'], retries: 1 } }).options).toEqual({ env: 'staging', browsers: ['firefox'], tag: ['smoke'], retries: 1 });

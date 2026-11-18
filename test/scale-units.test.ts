@@ -3,7 +3,7 @@ import { resolveConfig } from '../src/core/config.js';
 import { resolveTargets, buildProjects, artifactPolicy, projectDir } from '../src/core/scale/targets.js';
 import { parseShard, applyShard } from '../src/core/scale/shard.js';
 import { resolveEnvironment, environmentSecrets, publicEnvironments, EnvironmentError } from '../src/core/scale/environments.js';
-import { withDefaultTags, isDestructiveJourney, filterJourneyIds, editTags, normalizeTags } from '../src/core/scale/tags.js';
+import { withDefaultTags, isDestructiveJourney, filterJourneyIds, editTags, normalizeTags, parseTagEdits, applyTagEdits } from '../src/core/scale/tags.js';
 import { aggregateByJourney, failuresToHeal } from '../src/core/scale/results.js';
 import { publicError } from '../src/core/credentials.js';
 import type { Journey, TestResult } from '../src/core/types.js';
@@ -171,6 +171,19 @@ describe('SPEC-012 tags, destructive, filters (FR-12, 14..16)', () => {
     expect(editTags(js, [], { set: ['smoke'] }).map((x) => x.tags)).toEqual([['smoke'], ['smoke']]);
     expect(() => editTags(js, ['zz'], { add: ['x'] })).toThrow(/Unknown journey id.*zz.*a, b/);
     expect(() => editTags(js, ['a'], { add: ['!!'] })).toThrow(/Invalid tag/);
+  });
+});
+
+describe('SPEC-012 journeys tag edits (FR-15)', () => {
+  it('parses id=tag,tag pairs', () => {
+    expect(parseTagEdits(['a=x, y', '*=z'])).toEqual([{ id: 'a', tags: ['x', 'y'] }, { id: '*', tags: ['z'] }]);
+    for (const bad of ['nonsense', '=x', 'a=']) expect(() => parseTagEdits([bad])).toThrow(/id=tag/);
+  });
+  it('applies set, then add, then remove; validates before changing anything', () => {
+    const js = [j('a', { tags: ['regression'] }), j('b', { tags: ['smoke'] })];
+    expect(applyTagEdits(js, { set: ['*=smoke'], add: ['a=critical'], remove: ['b=smoke'] }).map((x) => x.tags)).toEqual([['smoke', 'critical'], []]);
+    expect(() => applyTagEdits(js, { add: ['a=ok', 'zz=x'] })).toThrow(/Unknown journey id.*zz/);
+    expect(js[0].tags).toEqual(['regression']);
   });
 });
 

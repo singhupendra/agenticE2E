@@ -60,7 +60,7 @@
 | ID | Requirement |
 |----|-------------|
 | FR-14 | Suite tags are `smoke`, `regression`, `critical`. The planner prompt asks the LLM for suite tags and `destructive`; after parsing, tags are lower-cased/de-duplicated and, when no suite tag was given, defaults are added by priority: high → `smoke, critical, regression`; medium/low → `regression`. |
-| FR-15 | New command `tags <url> [ids...] [--add <tags...>] [--remove <tags...>] [--set <tags...>]` edits the stored journeys' tags (no ids = all journeys); without edit options it lists id → tags. Unknown ids and invalid tags (`/^[a-z0-9][a-z0-9_-]*$/` after lower-casing) are errors. `PUT /api/sites/:site/journeys` keeps working for edits from the web. |
+| FR-15 | Tags are edited with the existing `journeys <url>` command: `--add-tags <id=tag,tag...>`, `--remove-tags <id=tag,...>`, `--set-tags <id=tag,...>` (`*` = every journey; repeatable / several pairs). Unknown ids and invalid tags (`/^[a-z0-9][a-z0-9_-]*$/` after lower-casing) are errors and nothing is saved. The journeys listing shows each journey's tags. In the web UI the journeys tab has an editable comma-separated tags field (saved via `PUT /api/sites/:site/journeys`, which normalises tags: lower-case, de-duplicated, invalid dropped); the tests tab shows tags. |
 | FR-16 | `--grep <pattern>` (substring, case-insensitive, or `/regex/flags`) on `id name tags`, and `--tag <tags...>` (journey has any of them) filter `run`, `heal` and `list-test-cases` (config keys `grep`, `tag`). Filters combine (AND) with explicit ids. A filter that matches nothing is an error for run/heal and an empty listing for `list-test-cases`. |
 
 ### 3.5 Timeouts, trace, video
@@ -93,7 +93,7 @@
 - **AC-8** Given env headers `{ 'x-env-token': '${TOKEN}' }` with `TOKEN=s3cr3t-token`, When the run executes, Then the server receives the header, and `s3cr3t-token` appears in no file under the data dir and in no progress event; with `TOKEN` unset the run fails naming `TOKEN` and the web error does not.
 - **AC-9** Given env `prod` (no explicit readOnly) and journeys `browse` and `delete-account` (heuristic) and `buy` (tag `destructive`), When `run --env prod`, Then only `browse` runs and a warn event names each skipped journey; with `readOnly: false` all run.
 - **AC-10** Given the planner returns a high-priority journey without tags and a low-priority one tagged `Smoke`, Then the first gets `smoke, critical, regression` and the second `smoke`.
-- **AC-11** Given stored journeys, When `tags <url> a --add critical --remove regression`, Then only `a` changes and is persisted; `tags <url> zz --add x` fails listing valid ids; `--add 'Bad Tag'` fails.
+- **AC-11** Given stored journeys, When `journeys <url> --add-tags a=critical --remove-tags a=regression`, Then only `a` changes and is persisted and the listing shows its tags; `--add-tags zz=x` fails listing valid ids; `--add-tags 'a=Bad Tag'` / `a=!!` fail; `--set-tags '*=smoke'` sets every journey; `PUT /api/sites/:site/journeys` with tags `[' Smoke ', 'smoke']` stores `['smoke']`.
 - **AC-12** Given journeys tagged `smoke`/`regression`, When `run --tag smoke` / `--grep checkout` / `list-test-cases --tag smoke`, Then only matching tests run/are listed; a filter with no match fails for run/heal.
 - **AC-13** Given `globalTimeoutMs: 60000`, `testTimeoutMs: 5000` and a journey with `timeoutMs: 1000` whose test waits 3 s, Then the config has `timeout: 5000, globalTimeout: 60000` and the journey's test times out.
 - **AC-14** Given `trace: 'on-failure', video: 'retain-on-failure'`, Then the config `use` has `trace: 'retain-on-first-failure', video: 'retain-on-failure'`; a failing test records `videoPath`.
@@ -101,4 +101,6 @@
 - **AC-16** Given a run in which journey `x` failed only on `firefox`, When healing, Then `x` is healed once, and `runAll().final` reports `x` failed (single entry).
 - **AC-17** Given a failing staging run and a later passing dev run of `x`, When `list-test-cases --env staging`, Then `x`'s last outcome is `failed`; without `--env` it is `passed`; `targets` lists both env×project entries.
 - **AC-18** Given a job request with `options.environments`, Then it is ignored and the server's environments are used; `GET /api/config` never contains a header value.
+- **AC-20** Given env headers with short/boolean values (`true`, `123`), When a run with a failing test completes, Then `report.json` and the failure dump still parse (header values are redacted value-by-value in JSON, never in the raw text).
+- **AC-21** Given a web job with an unknown `env`/device, an invalid shard or an unset header `${VAR}`, Then `POST /api/jobs` returns 400 (no variable name in the body) and a later job for the same site is accepted (no job stuck in `running`).
 - **AC-19** All previous tests pass; `pnpm typecheck` passes.

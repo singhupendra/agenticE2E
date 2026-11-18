@@ -1,7 +1,7 @@
 import type { Command } from 'commander';
-import { loadConfig, type Config, type PartialConfig } from '../core/config.js';
-import { editTags } from '../core/scale/tags.js';
-import { Store, normalizeSite } from '../core/storage.js';
+import type { Config, PartialConfig } from '../core/config.js';
+import { applyTagEdits } from '../core/scale/tags.js';
+import type { Journey } from '../core/types.js';
 
 /** SPEC-012: CLI flags for execution at scale (kept out of index.ts so it stays small). */
 const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
@@ -40,23 +40,16 @@ export function scaleCliConfig(o: Record<string, unknown>): PartialConfig {
   };
 }
 
-export function registerScaleCommands(program: Command) {
-  program.command('tags <url> [ids...]').description('show or edit journey tags (smoke, regression, critical, destructive, ...); no ids = all journeys')
-    .option('--add <tags...>', 'add tags')
-    .option('--remove <tags...>', 'remove tags')
-    .option('--set <tags...>', 'replace tags')
-    .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
-    .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
-    .action(async (url: string, ids: string[], o) => {
-      const site = normalizeSite(url).id;
-      const config = await loadConfig({ configFile: o.config, cli: { dataDir: o.dataDir } });
-      const store = new Store(config.dataDir);
-      let journeys = store.loadJourneys(site);
-      if (!journeys) throw new Error(`No journeys stored for ${site}. Run: agentic-e2e discover ${url}`);
-      const edited = editTags(journeys, ids ?? [], { add: o.add, remove: o.remove, set: o.set }); // also validates ids
-      if (o.add || o.remove || o.set) store.saveJourneys(site, (journeys = edited));
-      const shown = ids?.length ? journeys.filter((j) => ids.includes(j.id)) : journeys;
-      const w = Math.max(...shown.map((j) => j.id.length), 7);
-      for (const j of shown) console.log(`${j.id.padEnd(w)}  ${j.tags.join(', ') || '-'}`);
-    });
+/** FR-15: tag editing on the existing `journeys <url>` command. */
+export function addJourneyTagOptions(cmd: Command): Command {
+  return cmd
+    .option('--add-tags <id=tags...>', "add tags, e.g. checkout=critical,smoke ('*' = every journey)")
+    .option('--remove-tags <id=tags...>', 'remove tags, e.g. checkout=regression')
+    .option('--set-tags <id=tags...>', "replace tags, e.g. '*=regression' home=smoke,critical");
+}
+
+/** Returns the edited journeys, or null when no tag option was given. */
+export function applyJourneyTagOptions(journeys: Journey[], o: Record<string, unknown>): Journey[] | null {
+  const add = o.addTags as string[] | undefined, remove = o.removeTags as string[] | undefined, set = o.setTags as string[] | undefined;
+  return add || remove || set ? applyTagEdits(journeys, { add, remove, set }) : null;
 }

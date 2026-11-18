@@ -79,3 +79,25 @@ export function editTags(journeys: Journey[], ids: string[], edit: { add?: strin
     return { ...j, tags: [...new Set([...base, ...add])].filter((t) => !remove.has(t)) };
   });
 }
+
+export interface TagEdit { id: string; tags: string[] }
+
+/** `journeys --add-tags checkout=critical,smoke '*'=regression`: parse `id=tag,tag` pairs (`*` = every journey). */
+export function parseTagEdits(pairs: readonly string[] | undefined): TagEdit[] {
+  return (pairs ?? []).map((p) => {
+    const m = /^([^=]+)=(.+)$/.exec(p);
+    const tags = m ? m[2].split(',').map((t) => t.trim()).filter(Boolean) : [];
+    if (!m || !m[1].trim() || !tags.length) throw new Error(`Invalid tag edit "${p}": expected id=tag[,tag...] (use * for every journey)`);
+    return { id: m[1].trim(), tags };
+  });
+}
+
+/** FR-15: apply `--set-tags`, then `--add-tags`, then `--remove-tags`. Throws before returning anything on a bad id/tag. */
+export function applyTagEdits(journeys: Journey[], edits: { add?: readonly string[]; remove?: readonly string[]; set?: readonly string[] }): Journey[] {
+  let out = journeys;
+  const steps: [keyof typeof edits, readonly string[] | undefined][] = [['set', edits.set], ['add', edits.add], ['remove', edits.remove]];
+  for (const [kind, pairs] of steps) {
+    for (const e of parseTagEdits(pairs)) out = editTags(out, e.id === '*' ? [] : [e.id], { [kind]: e.tags });
+  }
+  return out;
+}
