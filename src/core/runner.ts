@@ -94,8 +94,14 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   const trace = artifactPolicy('trace', opts.trace ?? 'retain-on-failure', auth || headerValues.length > 0);
   if (!auth && headerValues.length && opts.trace !== 'off') opts.onProgress?.({ type: 'info', stage: 'run', message: `Tracing is off: environment "${opts.env!.name}" sends custom headers, which traces would record` });
   // The JSON report embeds the resolved config (incl. extraHTTPHeaders): scrub header values from everything we persist.
+  // JSON is scrubbed value by value (never the raw text), so a short header value like `true` cannot corrupt it.
   const headerRedactor = new Redactor(headerValues.map((value) => ({ value, placeholder: '[env header]' })));
   const scrub = (x: string) => headerRedactor.redact(store.redact(x));
+  const scrubJson = (raw: string): string => {
+    const redacted = store.redact(raw);
+    if (!headerRedactor.size) return redacted;
+    try { return JSON.stringify(headerRedactor.redactDeep(JSON.parse(redacted)), null, 2); } catch { return headerRedactor.redact(redacted); }
+  };
   const video = artifactPolicy('video', opts.video ?? 'off', auth);
   if (auth && ((opts.trace && opts.trace !== 'off') || (opts.video && opts.video !== 'off'))) {
     opts.onProgress?.({ type: 'info', stage: 'run', message: 'Trace and video recording are off for logged-in runs (they capture typed values and cookies)' });
@@ -153,7 +159,7 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   let report: PwReport = {};
   if (fs.existsSync(jsonFile)) {
     try {
-      const raw = scrub(fs.readFileSync(jsonFile, 'utf8'));
+      const raw = scrubJson(fs.readFileSync(jsonFile, 'utf8'));
       fs.writeFileSync(jsonFile, raw);
       report = JSON.parse(raw) as PwReport;
     } catch { /* handled below */ }
@@ -181,10 +187,12 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
         let failure: FailureSnapshot | undefined;
         const fj = path.join(failuresDir, sub, `${id}.json`);
         if (status !== 'passed' && fs.existsSync(fj)) {
-          const rawFailure = scrub(fs.readFileSync(fj, 'utf8'));
-          fs.writeFileSync(fj, rawFailure);
-          const f = JSON.parse(rawFailure) as FailureSnapshot;
-          failure = { ...f, screenshot: f.screenshot ? rel(f.screenshot) : undefined };
+          try {
+            const rawFailure = scrubJson(fs.readFileSync(fj, 'utf8'));
+            fs.writeFileSync(fj, rawFailure);
+            const f = JSON.parse(rawFailure) as FailureSnapshot;
+            failure = { ...f, screenshot: f.screenshot ? rel(f.screenshot) : undefined };
+          } catch { /* unreadable dump: report the failure without a snapshot */ }
         }
         byKey.set(resultKey(id, project), {
           journeyId: id, file: `tests/${id}.spec.ts`, status, durationMs: res.duration,

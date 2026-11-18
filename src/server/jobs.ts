@@ -85,10 +85,22 @@ export class JobManager {
       const credentials = loadCredentials({ file: config.credentialsFile ?? path.resolve(DEFAULT_CREDENTIALS_FILE), explicit: !!config.credentialsFile });
       authUserFor({ config, credentials }, req.url);
     }
-    const job: Job = { id: randomUUID(), action: req.action, url: req.url, site, status: 'running', startedAt: new Date().toISOString(), events: [] };
+    // SPEC-012: createContext validates targets, shard and the env (incl. ${VAR} headers). Build it before the job is
+    // registered so a bad option is a 400 and never leaves a job stuck in `running` (which would 409 the site forever).
+    let job: Job | undefined;
+    const early: ProgressEvent[] = [];
+    let ctx: ReturnType<typeof createContext>;
+    try {
+      ctx = createContext({ config, llm: this.llm, onProgress: (e) => (job ? this.emit(job, e) : early.push(e)) });
+    } catch (e) {
+      throw (e as { statusCode?: number }).statusCode ? e : Object.assign(e as Error, { statusCode: 400 });
+    }
+    job = { id: randomUUID(), action: req.action, url: req.url, site, status: 'running', startedAt: new Date().toISOString(), events: [] };
     this.jobs.set(job.id, job);
-    const ctx = createContext({ config, llm: this.llm, onProgress: (e) => this.emit(job, e) });
+    for (const e of early) this.emit(job, e);
+    const j = job;
     void (async () => {
+      const job = j;
       try {
         switch (req.action) {
           case 'discover': { const d = await discover(ctx, req.url, { rediscover: req.rediscover }); job.result = { journeys: d.journeys.length, reused: d.reused }; break; }
@@ -108,6 +120,6 @@ export class JobManager {
         this.emit(job, { type: 'error', message: job.error });
       }
     })();
-    return job;
+    return j;
   }
 }

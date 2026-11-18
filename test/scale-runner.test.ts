@@ -66,6 +66,17 @@ describe('SPEC-012 runner', () => {
     } finally { await staging.close(); }
   }, 60_000);
 
+  it('review: short/boolean header values do not corrupt report.json or failure dumps', async () => {
+    store.saveTest(SITE, 'ok', OK_SPEC);
+    store.saveTest(SITE, 'bad', FAIL_SPEC);
+    const r = await run({ env: { name: 'dev', baseUrl: site.url, headers: { 'x-feature-flag': 'true', 'x-api-version': '123' } } });
+    expect(r.results.map((x) => `${x.journeyId}:${x.status}`).sort()).toEqual(['bad:failed', 'ok:passed']);
+    const bad = r.results.find((x) => x.journeyId === 'bad')!;
+    expect(bad.error).not.toMatch(/did not produce a result/);
+    expect(bad.failure?.ariaSnapshot).toBeTruthy();
+    expect(() => JSON.parse(fs.readFileSync(path.join(store.runDir(SITE, r.id), 'report.json'), 'utf8'))).not.toThrow();
+  }, 60_000);
+
   it('AC-13: per-test, per-journey and global timeouts', async () => {
     store.saveTest(SITE, 'slow', SLOW_SPEC);
     store.saveTest(SITE, 'ok', OK_SPEC);

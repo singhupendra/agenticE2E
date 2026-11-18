@@ -211,7 +211,7 @@ export async function heal(ctx: Context, url: string, failedRun: RunRecord): Pro
   stage(ctx, 'heal', `Healing ${failures.length} failing test(s) (up to ${ctx.config.healAttempts} attempts each)`);
   for (const f of failures) {
     records.push(await healTest(ctx.store, ctx.getLLM(), {
-      site: meta.id, baseUrl: ctx.environment?.origin ?? meta.origin, journeyId: f.journeyId, failure: f, attempts: ctx.config.healAttempts,
+      site: meta.id, baseUrl: ctx.environment?.baseUrl ?? meta.origin, journeyId: f.journeyId, failure: f, attempts: ctx.config.healAttempts,
       runner: async (ids) => { const r = await run(ctx, url, { journeyIds: ids, kind: 'heal-rerun' }); return { ...r, results: aggregateByJourney(r.results) }; }, onProgress: ctx.onProgress, redactor: ctx.redactor,
     }));
   }
