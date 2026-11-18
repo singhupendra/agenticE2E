@@ -297,6 +297,28 @@ export default {
 - Results record `project`, `browser`, `device`, `env`, `retries`, `flaky` and `videoPath`; runs record `env`, `baseUrl`, `targets`, `workers`, `retries`, `shard` and filters. `list-test-cases` shows the latest outcome (failed if any target failed) and, in `--json`, the latest outcome per env × target.
 - Firefox/WebKit must be installed: `npx playwright install firefox webkit`.
 
+## Observability & LLM governance
+
+(SPEC-013.) Every CLI command / web job is one **run** with a correlation id (the job id for web jobs).
+
+| Feature | How |
+|---------|-----|
+| Structured logs | pino, to **stderr**: `--log-level trace\|debug\|info\|warn\|error\|fatal\|silent` (default `warn`), `--log-format pretty\|json` (`logLevel` / `logFormat`, `AGENTIC_E2E_LOG_LEVEL` / `AGENTIC_E2E_LOG_FORMAT`). Lines carry `correlationId`, `action`, `site`; test runs log `runId`; progress is mirrored at `debug`. |
+| Redaction | every serialised log line, span attribute, audit entry, usage report and cache entry passes the SPEC-009 `Redactor` (credential values) plus the values of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ACCESS_KEY_ID`, `E2E_*`, `OTEL_EXPORTER_OTLP_HEADERS`, and a scrubber for `sk-ant-…`, `AKIA…`, `ABSK…`, `Bearer …` and fields named `password`/`apiKey`/`authorization`/`token`/`secret`. |
+| Usage & cost | per call: provider, model, input/output/cache-read/cache-write tokens, latency, retries, estimated cost (pricing table in `src/core/llm/models.ts`, Anthropic list prices — Bedrock is billed by AWS). Printed after each command (`LLM: 5 calls (…), est. $0.0612`), stored in `data/sites/<site>/usage/<correlationId>.json`, listed by `agentic-e2e usage <url> [--json]`, `GET /api/sites/:site/usage` and the web UI **usage** tab. |
+| Budgets | `llmBudget: { maxCostPerRun, maxTokensPerRun }` (`--max-cost <usd>`, `--max-tokens-per-run <n>`; the CLI flags replace the file's `llmBudget`). When a limit is exceeded, LLM work stops with `LLMBudgetError` (exit 1 / job error) naming the limit and the spend; the usage report is still written. Web jobs cannot change the server's budget. |
+| Retries / timeouts | exponential backoff with full jitter (500 ms base, 20 s cap, `retry-after` honoured) on 408/409/429/5xx, connection errors and timeouts; `llmMaxRetries` (default 3), `llmTimeoutMs` per attempt (default 300000). SDK retries are disabled so they do not compound. |
+| Prompt caching | `promptCaching: true` (default) puts a `cache_control` breakpoint on the system prompt (works on the Anthropic API and Bedrock); cache read/write tokens are priced separately. |
+| Response cache | opt-in, deterministic: `--llm-cache read-write` (or `read-only` for CI, never writes) / `llmCache` / `AGENTIC_E2E_LLM_CACHE`. Keyed by a SHA-256 of the (redacted) prompt, system, schema, model and images; entries in `data/llm-cache/`. Hits cost nothing and make no network call. |
+| Audit log | `data/audit.jsonl`, append-only and hash-chained (who/what/when): `discover`, `generate`, `heal.patch_applied`, `journeys.status_changed` (CLI `journeys --approve/--reject/--edit`, `PUT /api/sites/:site/journeys`). Actor `cli:<os user>` / `web:<ip>`. `agentic-e2e audit [--site id] [--limit n] [--json] [--verify]`. |
+| Tracing (optional) | off unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set; spans (run → stage → LLM call, `gen_ai.*` attributes, trace id = correlation id) are POSTed as OTLP/HTTP JSON to `<endpoint>/v1/traces` with `OTEL_EXPORTER_OTLP_HEADERS`, `OTEL_SERVICE_NAME`. `OTEL_SDK_DISABLED=true` turns it off. Export failures only log a warning. |
+
+```bash
+agentic-e2e generate https://example.com --log-level info --log-format json --max-cost 0.50 2> logs.jsonl
+agentic-e2e all https://example.com --llm-cache read-write          # re-runs reuse identical LLM answers
+agentic-e2e usage https://example.com && agentic-e2e audit --verify
+```
+
 ## Web UI
 
 ```bash
@@ -364,6 +386,9 @@ data/sites/<host[_port]>/
   runs/<timestamp>/{result.json, report.json, output.log, failures/, artifacts/ (traces)}
   runs/<timestamp>/reports/{junit.xml, summary.json, report.html}   # SPEC-011
   screenshots/<timestamp>/<journey-id>/*.png   screenshots/discovery/*.png
+  usage/<correlation-id>.json       # SPEC-013 LLM usage report of one command / job
+data/audit.jsonl                    # SPEC-013 append-only, hash-chained audit log
+data/llm-cache/<xx>/<sha256>.json   # SPEC-013 opt-in response cache
 ```
 
 ## Architecture

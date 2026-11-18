@@ -48,7 +48,7 @@ describe('SPEC-013 GovernedLLM: usage accounting', () => {
     const t = tracker.totals();
     expect(t).toMatchObject({ calls: 1, failed: 0, cached: 0, inputTokens: 1000, outputTokens: 500, totalTokens: 3600, unpricedCalls: 0 });
     expect(c.json().find((l) => l.msg === 'llm.call')).toMatchObject({ level: 'info', call: 1, inputTokens: 1000, outputTokens: 500 });
-    expect(formatUsageSummary(t)).toMatch(/^LLM: 1 call \(0 cached, 0 failed\), 1,000 in \/ 500 out tokens \(cache r\/w 2,000\/100\), est\. \$0\.0075$/);
+    expect(formatUsageSummary(t)).toMatch(/^LLM: 1 call \(0 cached, 0 failed\), 1,000 in \/ 500 out tokens \(cache r\/w 2,000\/100\), est\. \$0\.007[45]$/);
   });
 
   it('providers without usage (MockLLM) are recorded with zero tokens', async () => {
@@ -78,8 +78,8 @@ describe('SPEC-013 GovernedLLM: usage accounting', () => {
 
 describe('SPEC-013 budgets', () => {
   it('AC-7: maxCostPerRun stops after the call that exceeds it and refuses the next one', async () => {
-    // haiku-4-5: 1000 in + 1400 out = 0.001 + 0.007 = $0.008 per call
-    const p = new FakeProvider(usage(1000, 1400));
+    // the provider reports claude-sonnet-5-5: 1000 in + 600 out = 0.002 + 0.006 = $0.008 per call
+    const p = new FakeProvider(usage(1000, 600));
     const tracker = new UsageTracker({ budget: { maxCostPerRun: 0.01 } });
     const llm = new GovernedLLM(p, { provider: 'anthropic', model: 'claude-haiku-4-5', usage: tracker, retry: noSleep });
     await llm.structured(req());

@@ -1,4 +1,4 @@
-import type { LLMProvider } from './llm/types.js';
+import { LLMBudgetError, type LLMProvider } from './llm/types.js';
 import { codeSchema } from './llm/schemas.js';
 import { pageToPrompt } from './planner.js';
 import type { Redactor } from './redact.js';
@@ -72,6 +72,7 @@ export async function generateTests(store: Store, llm: LLMProvider, journeys: Jo
       res.generated.push(journey.id);
       opts.onProgress?.({ type: 'info', stage: 'generate', message: `Saved ${journey.id}.spec.ts (${attempts} attempt${attempts > 1 ? 's' : ''})` });
     } catch (e) {
+      if (e instanceof LLMBudgetError) throw e; // SPEC-013 FR-16: stop the run, not just this journey
       const error = (e as Error).message;
       res.failed.push({ id: journey.id, error });
       opts.onProgress?.({ type: 'warn', stage: 'generate', message: error });

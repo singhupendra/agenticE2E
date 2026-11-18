@@ -10,6 +10,7 @@ import { createLLMProvider } from './llm/index.js';
 import { RedactingLLM } from './llm/redacting.js';
 import type { LLMProvider } from './llm/types.js';
 import { Redactor } from './redact.js';
+import { createObservability, type Observability, type ObservabilityOptions } from './obs/index.js';
 import { proposeJourneys, selectJourneys } from './planner.js';
 import { runTests } from './runner.js';
 import { Store, normalizeSite } from './storage.js';
@@ -32,9 +33,11 @@ export interface Context {
   redact: (s: string) => string;
   /** SPEC-012: the selected environment (`--env`), or null. Its header values are in `redactor`. */
   environment: ResolvedEnvironment | null;
+  /** SPEC-013: logger, LLM usage/budget, audit log, tracer of this run (one CLI command / web job) */
+  obs: Observability;
 }
 
-export function createContext(opts: { config: Config; llm?: LLMProvider; onProgress?: ProgressFn; cwd?: string }): Context {
+export function createContext(opts: { config: Config; llm?: LLMProvider; onProgress?: ProgressFn; cwd?: string; obs?: ObservabilityOptions }): Context {
   const raw: ProgressFn = opts.onProgress ?? (() => {});
   const { config } = opts;
   const credentials = config.auth
@@ -49,14 +52,16 @@ export function createContext(opts: { config: Config; llm?: LLMProvider; onProgr
   if (config.shard) parseShard(config.shard);
   const environment = resolveEnvironment(config);
   const redactor = new Redactor([...credentials.secretEntries(), ...environmentSecrets(environment)]);
+  // SPEC-013: logs/traces/audit/usage are redacted with the same secrets (credentials + environment header values).
+  const obs = createObservability(config, [...credentials.secretEntries(), ...environmentSecrets(environment)], opts.obs);
   let llm: LLMProvider | undefined;
   return {
     config,
     store: new Store(config.dataDir, redactor),
-    onProgress: (e) => raw(redactor.size ? redactor.redactDeep(e) : e),
+    onProgress: (e) => { const r = redactor.size ? redactor.redactDeep(e) : e; obs.progress(r); raw(r); },
     getLLM: () => {
       if (!llm) {
-        const inner = opts.llm ?? createLLMProvider(config);
+        const inner = obs.governLLM(opts.llm ?? createLLMProvider(config));
         llm = config.auth ? new RedactingLLM(inner, redactor, { dropImages: true }) : inner;
       }
       return llm;
@@ -65,6 +70,7 @@ export function createContext(opts: { config: Config; llm?: LLMProvider; onProgr
     redactor,
     redact: (s) => redactor.redact(s),
     environment,
+    obs,
   };
 }
 
@@ -105,6 +111,7 @@ export async function discover(ctx: Context, url: string, opts: { rediscover?: b
   const journeys = await selectJourneys(ctx.getLLM(), proposed, { maxJourneys: config.maxJourneys, include: config.include, exclude: config.exclude });
   store.saveJourneys(meta.id, journeys);
   store.saveSite({ id: meta.id, origin: meta.origin, url: meta.url || meta.origin, discoveredAt: new Date().toISOString() });
+  ctx.obs.audit.append('discover', { site: meta.id, details: { pages: pages.length, proposed: proposed.length, journeys: journeys.map((j) => j.id), ...(user ? { user: user.name } : {}) } });
   return { site: meta.id, journeys, pages, reused: false };
 }
 
@@ -131,6 +138,7 @@ export async function generate(ctx: Context, url: string, opts: { regenerate?: b
     site: d.site, baseUrl: meta.origin, pages: d.pages ?? [], retries: ctx.config.codegenRetries,
     requireApproval: ctx.config.requireApproval, regenerate: opts.regenerate, onProgress: ctx.onProgress,
   });
+  if (result.generated.length || result.failed.length) ctx.obs.audit.append('generate', { site: d.site, details: { generated: result.generated, reused: result.skipped, failed: result.failed.map((f) => f.id), ...(user ? { user: user.name } : {}) } });
   return { site: d.site, journeys: d.journeys, result, reusedJourneys: d.reused };
 }
 
@@ -182,7 +190,7 @@ export async function run(ctx: Context, url: string, opts: { journeyIds?: string
   const journeyTimeouts = Object.fromEntries(ids.flatMap((id) => (journeys.get(id)?.timeoutMs ? [[id, journeys.get(id)!.timeoutMs!]] : [])));
   const exec = async (storageState?: string) => {
     stage(ctx, 'run', 'Running tests');
-    return runTests(store, {
+    const r = await runTests(store, {
       site: meta.id, baseUrl: env?.baseUrl ?? meta.origin, journeyIds: ids, screenshots: config.screenshots, fullPage: config.fullPage,
       headless: config.headless, testTimeoutMs: config.testTimeoutMs, kind: opts.kind, onProgress: ctx.onProgress,
       targets: resolveTargets(config), // Heal verification re-runs never retry: a candidate fix must pass on its own (and ci attempts never multiply).
@@ -192,6 +200,8 @@ export async function run(ctx: Context, url: string, opts: { journeyIds?: string
       meta: { ...(shard ? { shard } : {}), ...(hasFilter(filters) ? { filters } : {}) },
       ...(user && storageState ? { auth: { storageState, journeyIds: authIds, env: { E2E_USERNAME: user.username, E2E_PASSWORD: user.password } } } : {}),
     });
+    ctx.obs.log.info({ runId: r.id, kind: r.kind, tests: r.results.length, passed: r.results.filter((x) => x.status === 'passed').length }, 'run.finished');
+    return r;
   };
   if (!user || !authIds.length) return exec();
   const session = await ensureSession(ctx, targetUrl, { user: user.name });
@@ -213,10 +223,15 @@ export async function heal(ctx: Context, url: string, failedRun: RunRecord): Pro
   if (!failures.length) return records;
   stage(ctx, 'heal', `Healing ${failures.length} failing test(s) (up to ${ctx.config.healAttempts} attempts each)`);
   for (const f of failures) {
-    records.push(await healTest(ctx.store, ctx.getLLM(), {
+    const rec = await healTest(ctx.store, ctx.getLLM(), {
       site: meta.id, baseUrl: ctx.environment?.baseUrl ?? meta.origin, journeyId: f.journeyId, failure: f, attempts: ctx.config.healAttempts,
       runner: async (ids) => { const r = await run(ctx, url, { journeyIds: ids, kind: 'heal-rerun' }); return { ...r, results: aggregateByJourney(r.results) }; }, onProgress: ctx.onProgress, redactor: ctx.redactor,
-    }));
+    });
+    records.push(rec);
+    if (rec.outcome === 'healed' && rec.diff) {
+      const lines = rec.diff.split('\n');
+      ctx.obs.audit.append('heal.patch_applied', { site: meta.id, details: { journeyId: rec.journeyId, healId: rec.id, verdict: rec.verdict, linesAdded: lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length, linesRemoved: lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length } });
+    }
   }
   return records;
 }

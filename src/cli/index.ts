@@ -18,11 +18,14 @@ import { addReportOptions, commanderExitCode, registerCiCommand, reportCliConfig
 import { addJourneyTagOptions, addScaleOptions, applyJourneyTagOptions, scaleCliConfig } from './scale.js';
 import { registerConfigCommands } from './commands/config.js';
 import { registerTokenCommands } from './commands/token.js';
+import { AUDIT_FILE, AuditLog, cliActor, journeyStatusChanges } from '../core/obs/audit.js';
+import { formatUsageSummary } from '../core/llm/usage.js';
+import { addObsOptions, obsCliConfig, registerObsCommands } from './obs-commands.js';
 
 const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
 
 function addCommon(cmd: Command): Command {
-  return addScaleOptions(cmd)
+  return addObsOptions(addScaleOptions(cmd))
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
     .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
     .option('--screenshots <mode>', 'off | on-failure | every-step | end-of-journey')
@@ -66,6 +69,7 @@ function cliConfig(o: Record<string, unknown>): PartialConfig {
     credentialsFile: o.credentials as string | undefined,
     ...reportCliConfig(o),
     ...scaleCliConfig(o),
+    ...obsCliConfig(o),
   };
 }
 
@@ -74,9 +78,23 @@ export function logEvent(e: ProgressEvent) {
   console.log(`${tag} ${e.message}`);
 }
 
-async function ctxFrom(o: Record<string, unknown>): Promise<Context> {
+/** SPEC-013: contexts created by the running command; finished (usage report, spans, summary line) by `main`. */
+const openContexts: { ctx: Context; action: string; site: string }[] = [];
+
+async function ctxFrom(o: Record<string, unknown>, action: string, url: string): Promise<Context> {
   const config = await loadConfig({ configFile: o.config as string | undefined, cli: cliConfig(o) });
-  return createContext({ config, onProgress: logEvent });
+  const site = normalizeSite(url).id;
+  const ctx = createContext({ config, onProgress: logEvent, obs: { actor: cliActor(), action, site } });
+  openContexts.push({ ctx, action, site });
+  return ctx;
+}
+
+async function finishContexts(status: 'ok' | 'error', error?: string) {
+  for (const { ctx, action, site } of openContexts.splice(0)) {
+    await ctx.obs.finish({ action, site, status, error });
+    const t = ctx.obs.usage.totals();
+    if (t.calls) console.log(`\n${formatUsageSummary(t)}`);
+  }
 }
 
 function printJourneys(journeys: Journey[]) {
@@ -114,7 +132,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .option('--rediscover', 'ignore stored journeys and discover again')
     .action(async (url: string, o) => {
       normalizeSite(url);
-      const d = await discover(await ctxFrom(o), url, { rediscover: o.rediscover });
+      const d = await discover(await ctxFrom(o, 'discover', url), url, { rediscover: o.rediscover });
       console.log(`\nSite ${d.site}: ${d.journeys.length} journeys${d.reused ? ' (stored)' : ''}`);
       printJourneys(d.journeys);
     });
@@ -130,6 +148,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const store = new Store(config.dataDir);
       let journeys = store.loadJourneys(site);
       if (!journeys) throw new Error(`No journeys stored for ${site}. Run: agentic-e2e discover ${url}`);
+      const before = journeys;
       if (o.approve) journeys = setStatus(journeys, o.approve, 'approved');
       if (o.reject) journeys = setStatus(journeys, o.reject, 'rejected');
       if (o.approveAll) journeys = journeys.map((j) => (j.status === 'rejected' ? j : { ...j, status: 'approved' as const }));
@@ -137,6 +156,8 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (tagged) journeys = tagged;
       if (o.approve || o.reject || o.approveAll || tagged) store.saveJourneys(site, journeys);
       if (o.edit) journeys = editJourneys(store, site, journeys);
+      const changes = journeyStatusChanges(before, journeys); // SPEC-013 FR-24
+      if (changes.length) new AuditLog({ file: path.join(config.dataDir, AUDIT_FILE), actor: cliActor() }).append('journeys.status_changed', { site, details: { changes, ...(o.edit ? { edited: true } : {}) } });
       printJourneys(journeys);
     });
 
@@ -145,7 +166,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .option('--regenerate', 'regenerate code even if stored')
     .action(async (url: string, o) => {
       normalizeSite(url);
-      const g = await generate(await ctxFrom(o), url, { regenerate: o.regenerate, rediscover: o.rediscover });
+      const g = await generate(await ctxFrom(o, 'generate', url), url, { regenerate: o.regenerate, rediscover: o.rediscover });
       console.log(`\nGenerated: ${g.result.generated.join(', ') || '-'} | reused: ${g.result.skipped.join(', ') || '-'} | failed: ${g.result.failed.map((f) => f.id).join(', ') || '-'}`);
       if (g.result.failed.length) setExit(1);
     });
@@ -154,7 +175,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .option('--journey <ids...>', 'only these journey ids')
     .action(async (url: string, o) => {
       normalizeSite(url);
-      const ctx = await ctxFrom(o);
+      const ctx = await ctxFrom(o, 'run', url);
       const r = await run(ctx, url, { journeyIds: o.journey });
       printRun(r);
       const failed = r.results.some((t) => t.status !== 'passed');
@@ -168,7 +189,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .action(async (url: string, testIds: string[], o) => {
       normalizeSite(url);
       const ids = [...new Set<string>([...(testIds ?? []), ...(o.journey ?? [])])];
-      const ctx = await ctxFrom(o);
+      const ctx = await ctxFrom(o, 'heal', url);
       const r = await healSelected(ctx, url, { ids, failedOnly: o.failed });
       if (r.noneFailing) return; // healSelected already reported "No failing tests to heal" via progress
       if (r.run) printRun(r.run);
@@ -191,7 +212,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .option('--regenerate', 'regenerate code even if stored')
     .action(async (url: string, o) => {
       normalizeSite(url);
-      const ctx = await ctxFrom(o);
+      const ctx = await ctxFrom(o, 'all', url);
       const r = await runAll(ctx, url, { rediscover: o.rediscover, regenerate: o.regenerate });
       console.log('\nFinal:');
       for (const f of r.final) console.log(`  ${f.status === 'passed' ? '✔' : '✗'} ${f.journeyId} ${f.status}${f.healed ? ' (healed)' : ''}`);
@@ -209,7 +230,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .option('--provider <name>').option('--model <id>').option('--aws-region <region>').option('--aws-profile <name>')
     .action(async (url: string, o) => {
       const meta = normalizeSite(url);
-      const ctx = await ctxFrom({ ...o, auth: true });
+      const ctx = await ctxFrom({ ...o, auth: true }, 'auth-check', url);
       const s = await ensureSession(ctx, url, { user: o.user, force: true });
       console.log(`Login OK for user "${s.user}" on ${meta.id}; session saved to ${ctx.store.authStatePath(meta.id, s.user)}`);
     });
@@ -293,6 +314,7 @@ export function buildProgram(setExit: (code: number) => void): Command {
 
   registerConfigCommands(program, setExit); // SPEC-014
   registerTokenCommands(program); // SPEC-014
+  registerObsCommands(program);
 
   return program;
 }
@@ -302,9 +324,11 @@ export async function main(argv: string[]): Promise<number> {
   const program = buildProgram((c) => { exit = c; });
   try {
     await program.parseAsync(argv);
+    await finishContexts(exit ? 'error' : 'ok');
     return exit;
   } catch (e) {
     const err = e as { code?: string; exitCode?: number; message: string };
+    await finishContexts('error', err.message);
     if (err.code?.startsWith('commander.')) return commanderExitCode(argv, err);
     console.error(`Error: ${err.message}`);
     return 1;

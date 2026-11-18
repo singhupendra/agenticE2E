@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
-import type { LLMProvider } from './llm/types.js';
+import { LLMBudgetError, type LLMProvider } from './llm/types.js';
 import { healSchema } from './llm/schemas.js';
 import { stripFences } from './codegen.js';
 import type { Redactor } from './redact.js';
@@ -139,6 +139,7 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
       feedback.push(`Attempt ${n}: your patch ran but still failed with: ${(rerun.error ?? '').slice(0, 600)}`);
     }
   } catch (e) {
+    if (e instanceof LLMBudgetError) throw e; // SPEC-013 FR-16 (`finally` still restores the original)
     outcome = 'failed';
     aborted = true;
     reason = `Healing aborted by error: ${(e as Error).message}`;

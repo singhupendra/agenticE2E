@@ -17,6 +17,10 @@ import { JobManager, parseJobRequest } from './jobs.js';
 import { createStorageBackend, type StorageBackend } from '../core/storage/index.js';
 import { Lifecycle, setLifecycle } from './lifecycle.js';
 import { registerSecurity, type AuthOptions } from './security.js';
+import { AUDIT_FILE, AuditLog, journeyStatusChanges } from '../core/obs/audit.js';
+import { listUsageReports } from '../core/obs/usage-store.js';
+import { OBS_SERVER_ONLY_KEYS } from '../core/obs/config.js';
+import { addTotals, emptyTotals } from '../core/llm/usage.js';
 
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain', '.webm': 'video/webm' };
@@ -35,6 +39,8 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   const jobs = new JobManager(opts.config, opts.llm);
   const lifecycle = new Lifecycle({ activeJobs: () => jobs.list().filter((j) => j.status === 'running').length });
   setLifecycle(app, lifecycle);
+  const audit = new AuditLog({ file: path.join(opts.config.dataDir, AUDIT_FILE), actor: 'web:unknown' }); // SPEC-013 FR-23
+  const webActor = (req: { ip?: string }) => `web:${req.ip ?? 'unknown'}`;
 
   // This server runs generated tests and spends LLM credits. Defences:
   //  1. Host allowlist on every request (stops DNS rebinding: a rebound page has Host == Origin == attacker.com).
@@ -78,7 +84,9 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
     const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, server: _s, environments, ...pub } = opts.config;
-    return { ...pub, environments: publicEnvironments(environments) }; // SPEC-012: header names only, never values
+    // SPEC-013: server-only settings (budget, logging, retries) are not job options, so the UI must not echo them back.
+    const visible = Object.fromEntries(Object.entries(pub).filter(([k]) => !(OBS_SERVER_ONLY_KEYS as readonly string[]).includes(k)));
+    return { ...visible, environments: publicEnvironments(environments) }; // SPEC-012: header names only, never values
   });
   app.get<{ Querystring: { provider?: string } }>('/api/models', async (req, reply) => {
     const provider = req.query.provider ?? opts.config.provider;
@@ -125,12 +133,22 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     return listTestCases(store, meta.id);
   });
 
+  // SPEC-013 FR-13: LLM usage reports of a site (newest first) + their sum.
+  app.get<{ Params: { site: string } }>('/api/sites/:site/usage', async (req, reply) => {
+    const meta = siteOr404(req.params.site, reply);
+    if (!meta) return;
+    const reports = listUsageReports(opts.config.dataDir, meta.id);
+    return { reports, totals: reports.reduce((t, r) => addTotals(t, r.totals), emptyTotals()) };
+  });
+
   app.put<{ Params: { site: string }; Body: unknown }>('/api/sites/:site/journeys', async (req, reply) => {
     const meta = siteOr404(req.params.site, reply);
     if (!meta) return;
     try {
       const journeys = parseJourneys(req.body);
+      const changes = journeyStatusChanges(store.loadJourneys(meta.id) ?? [], journeys);
       store.saveJourneys(meta.id, journeys);
+      if (changes.length) audit.append('journeys.status_changed', { site: meta.id, actor: webActor(req), details: { changes } });
       return journeys;
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
@@ -193,7 +211,7 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     // Only meaningful (and only checked) when the job will actually use Bedrock.
     if (profile && (jr.options?.provider ?? opts.config.provider) === 'bedrock' && !listAwsProfiles(opts.awsEnv ?? process.env).includes(profile)) return reply.code(400).send({ error: `Unknown AWS profile "${profile}"` });
     try {
-      const job = jobs.start(jr);
+      const job = jobs.start(jr, { actor: webActor(req) });
       return reply.code(202).send({ jobId: job.id });
     } catch (e) {
       if (e instanceof CredentialsError) console.error(`[agentic-e2e] POST /api/jobs: ${e.message}`);

@@ -7,6 +7,7 @@ import { NOTIFY_ON } from './reporting/notify.js';
 import { scaleConfigShape } from './scale/options.js';
 import { ConfigError, validateWith } from './config-check.js';
 import { serverEnv, serverSchema } from './security/server-config.js';
+import { OBS_ENV_MAP, obsConfigShape } from './obs/config.js';
 
 export const SCREENSHOT_MODES = ['off', 'on-failure', 'every-step', 'end-of-journey'] as const;
 
@@ -48,6 +49,8 @@ export const configSchema = z.object({
   notifyOn: z.enum(NOTIFY_ON).default('always'),
   /** SPEC-012: browsers/devices, workers/retries/shard, environments, grep/tag filters, global timeout, trace/video. */
   ...scaleConfigShape,
+  /** SPEC-013: logging, LLM budgets/retries/caching. */
+  ...obsConfigShape,
   /** SPEC-014: web server / API security settings (never overridable per job). */
   server: serverSchema.prefault({}),
 }).strict(); // SPEC-014: unknown keys are errors (with a did-you-mean hint), not silently ignored
@@ -66,6 +69,7 @@ const ENV_MAP: Record<string, { key: keyof Config; parse: (v: string) => unknown
   AGENTIC_E2E_CREDENTIALS: { key: 'credentialsFile', parse: String },
   AGENTIC_E2E_REPORT_DIR: { key: 'reportDir', parse: String },
   AGENTIC_E2E_ENV: { key: 'env', parse: String },
+  ...OBS_ENV_MAP,
 };
 
 function stripUndefined<T extends object>(o: T | undefined): Partial<T> {

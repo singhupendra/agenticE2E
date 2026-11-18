@@ -161,6 +161,12 @@ describe('SPEC-013 server', () => {
     expect((await app.inject('/api/sites/..%2Fetc/usage')).statusCode).toBe(400);
   });
 
+  it('server-only settings are not exposed in /api/config, so the UI can echo it back as job options', async () => {
+    const cfg = (await app.inject('/api/config')).json();
+    for (const k of ['logLevel', 'logFormat', 'llmBudget', 'llmMaxRetries', 'llmTimeoutMs', 'promptCaching']) expect(cfg, k).not.toHaveProperty(k);
+    expect(cfg.llmCache).toBe('off');
+  });
+
   it('AC-19: a job asking to change the budget is rejected', async () => {
     const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: fx.url, options: { llmBudget: { maxCostPerRun: 999 } } } });
     expect(res.statusCode).toBe(400);
@@ -212,7 +218,7 @@ describe('SPEC-013 cli', () => {
     expect(e.actor).toMatch(/^cli:/);
     out.length = 0;
     expect(await cli('audit', '--verify')).toBe(0);
-    expect(out.join('\n')).toMatch(/1 entr(y|ies).*intact/i);
+    expect(out.join('\n')).toMatch(/intact: 1 entry/i);
     out.length = 0;
     expect(await cli('audit', '--json')).toBe(0);
     expect(JSON.parse(out.join('\n'))).toHaveLength(1);
