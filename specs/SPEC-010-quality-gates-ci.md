@@ -70,7 +70,7 @@
 
 | ID | Requirement |
 |----|-------------|
-| FR-17 | Triggers: `schedule` (daily) and `workflow_dispatch`; never `pull_request`/`push`. The job runs only if repository variable `AGENTIC_E2E_NIGHTLY == 'true'` — unset ⇒ skipped. |
+| FR-17 | Triggers: `schedule` (daily) and `workflow_dispatch`; never `pull_request`/`push`. Its Node version is one of the CI matrix versions (currently `24`). The job runs only if repository variable `AGENTIC_E2E_NIGHTLY == 'true'` — unset ⇒ skipped. |
 | FR-18 | It **replays stored tests** with `pnpm cli run <url> --data-dir "$DATA_DIR"` (no discover/generate/heal, no LLM tokens). Because `data/` is gitignored, tests come from a committed data directory `AGENTIC_E2E_NIGHTLY_DATA_DIR` (default `e2e-data`); a missing `<dir>/sites` is a clear error. Sites come from variable `AGENTIC_E2E_NIGHTLY_SITES`: one per line, `<url> [extra run flags]` (e.g. `--auth --user alice`); blank lines and `#` comments ignored; flags are word-split, never `eval`ed. `pnpm check:secrets` runs before any test. |
 | FR-19 | Optional secret `AGENTIC_E2E_CREDENTIALS_JSON` is written to `$RUNNER_TEMP` with mode `600` (outside the workspace), every string value in it is registered with `::add-mask::`, it is passed via `AGENTIC_E2E_CREDENTIALS`, and it is deleted at the end. LLM secrets (`ANTHROPIC_API_KEY` / `AWS_BEARER_TOKEN_BEDROCK` + provider variables) are passed only for login-form detection on hint-less `--auth` sites. The artifact uploads only `<dir>/sites/*/runs/` and `screenshots/`, with `**/auth/**` excluded. `permissions: contents: read`. Any failing test fails the job. |
 

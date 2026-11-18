@@ -69,6 +69,12 @@ describe('nightly workflow (SPEC-010 AC-6)', () => {
   const text = read('.github/workflows/nightly.yml');
   const wf = yamlOf('.github/workflows/nightly.yml');
 
+  it('uses a Node version that the CI matrix tests', () => {
+    const matrix: string[] = yamlOf('.github/workflows/ci.yml').jobs.checks.strategy.matrix.node.map(String);
+    const setupNode = steps.find((s) => (s.uses ?? '').startsWith('actions/setup-node'));
+    expect(matrix).toContain(String(setupNode?.with?.['node-version']));
+  });
+
   it('only runs on schedule / manual dispatch', () => {
     expect(Object.keys(wf.on).sort()).toEqual(['schedule', 'workflow_dispatch']);
   });
