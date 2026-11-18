@@ -104,6 +104,12 @@ describe('SPEC-012 pipeline', () => {
     expect(store.listRuns(SITE).length).toBe(before);
   }, 60_000);
 
+  it('retry / heal re-runs are never sharded', async () => {
+    seed([j('a'), j('b'), j('c')]);
+    const r = await run(ctxWith({ environments: { dev: { baseUrl: site.url } }, env: 'dev' }, { shard: '2/2' }), URL_, { journeyIds: ['a'], kind: 'retry' });
+    expect(r.results.map((x) => x.journeyId)).toEqual(['a']);
+  }, 60_000);
+
   it('AC-16: a journey failing on two projects is healed once', async () => {
     seed([j('x')]);
     const llm = new MockLLM(() => ({ verdict: 'app_bug', reason: 'server bug' }));

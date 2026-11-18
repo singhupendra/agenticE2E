@@ -25,6 +25,11 @@ export interface ReportTest {
   error?: string;
   flaky?: FlakyInfo;
   heal?: ReportHeal;
+  /** SPEC-012: browser/device project and environment of this row (one row per journey × project) */
+  project?: string;
+  browser?: string;
+  device?: string;
+  env?: string;
   /** paths relative to the site dir */
   screenshots: string[];
   trace?: string;
@@ -58,8 +63,10 @@ export function buildRunReport(input: BuildReportInput): RunReport {
   const [primary, ...later] = input.runs;
   if (!primary) throw new Error('buildRunReport needs at least one run');
   const names = new Map((input.journeys ?? []).map((j) => [j.id, j.name]));
+  const multi = (primary.targets?.length ?? 0) > 1;
+  const sameRow = (a: TestResult, b: TestResult) => a.journeyId === b.journeyId && (a.project ?? '') === (b.project ?? '');
   const tests = primary.results.map((first): ReportTest => {
-    const attempts = [first, ...later.flatMap((r) => r.results.filter((x) => x.journeyId === first.journeyId))];
+    const attempts = [first, ...later.flatMap((r) => r.results.filter((x) => sameRow(x, first)))];
     const last = attempts.at(-1)!;
     const h = input.heals.filter((x) => x.journeyId === first.journeyId).at(-1);
     let outcome: ReportOutcome = last.status === 'passed' ? 'passed' : last.status === 'skipped' ? 'skipped' : 'failed';
@@ -71,7 +78,7 @@ export function buildRunReport(input: BuildReportInput): RunReport {
     const errorOf = [...attempts].reverse().find((a) => a.error)?.error;
     return {
       journeyId: first.journeyId,
-      name: names.get(first.journeyId) ?? first.journeyId,
+      name: `${names.get(first.journeyId) ?? first.journeyId}${multi && first.project ? ` [${first.project}]` : ''}`,
       outcome,
       status: last.status,
       durationMs: attempts.reduce((s, a) => s + (a.durationMs || 0), 0),
@@ -79,6 +86,10 @@ export function buildRunReport(input: BuildReportInput): RunReport {
       ...(outcome === 'failed' || outcome === 'skipped' ? (errorOf ? { error: errorOf } : {}) : {}),
       ...(flaky?.flaky ? { flaky } : {}),
       ...(h ? { heal: { outcome: h.outcome, verdict: h.verdict, reason: h.reason, diff: h.diff, candidateDiff: h.candidateDiff } } : {}),
+      ...(first.project ? { project: first.project } : {}),
+      ...(first.browser ? { browser: first.browser } : {}),
+      ...(first.device ? { device: first.device } : {}),
+      ...(first.env ? { env: first.env } : {}),
       screenshots,
       ...(trace ? { trace } : {}),
     };

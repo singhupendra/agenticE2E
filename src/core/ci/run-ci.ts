@@ -72,18 +72,21 @@ export async function runCi(o: CiOptions): Promise<CiResult> {
   let heals: HealRecord[] = [];
   let infra = false;
   try {
-    runs.push(await run(ctx, o.url));
-    const last = new Map(runs[0].results.map((r) => [r.journeyId, r]));
-    const failing = () => [...last.values()].filter(isFail).map((r) => r.journeyId);
+    // Retries are separate `retry` runs (FR-8), so Playwright's own retries are off here.
+    runs.push(await run(ctx, o.url, { playwrightRetries: 0 }));
+    // SPEC-012: a journey has one result per browser/device project; it is failing while any project fails.
+    const key = (r: { journeyId: string; project?: string }) => `${r.journeyId}\u0000${r.project ?? ''}`;
+    const last = new Map(runs[0].results.map((r) => [key(r), r]));
+    const failing = () => [...new Set([...last.values()].filter(isFail).map((r) => r.journeyId))];
     for (let i = 1; i <= o.config.retries && failing().length; i++) {
       progress({ type: 'stage', stage: 'retry', message: `Retry ${i}/${o.config.retries}: re-running ${failing().length} failing test(s)` });
-      const r = await run(ctx, o.url, { journeyIds: failing(), kind: 'retry' });
+      const r = await run(ctx, o.url, { journeyIds: failing(), kind: 'retry', playwrightRetries: 0 });
       runs.push(r);
-      for (const x of r.results) last.set(x.journeyId, x);
+      for (const x of r.results) last.set(key(x), x);
     }
     const still = failing();
     if (still.length && o.allowHeal && o.config.healAttempts > 0) {
-      heals = await heal(ctx, o.url, { ...runs[0], results: still.map((id) => last.get(id)!) });
+      heals = await heal(ctx, o.url, { ...runs[0], results: [...last.values()].filter(isFail) }); // heal() heals each journey once
       infra = heals.some((h) => h.outcome === 'failed' && h.reason.startsWith(HEAL_ABORTED));
     } else if (still.length && !o.allowHeal) {
       progress({ type: 'info', stage: 'ci', message: `${still.length} test(s) failing; not healing (CI mode never rewrites tests without --allow-heal)` });

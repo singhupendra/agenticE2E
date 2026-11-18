@@ -12,7 +12,7 @@ export function addScaleOptions(cmd: Command): Command {
     .option('--browser <names...>', 'browsers to run on: chromium | firefox | webkit (default: chromium)')
     .option('--device <names...>', "Playwright device presets to emulate, e.g. 'iPhone 15' 'Pixel 7'")
     .option('--workers <n>', 'parallel workers (number or percentage like 50%)', workers)
-    .option('--retries <n>', 'retries per failing test', num)
+    .option('--retries <n>', 'retry failing tests up to n times (run/heal/all: Playwright retries; ci: separate retry runs without the LLM, passing on retry = flaky)', num)
     .option('--shard <i/n>', 'run only shard i of n (journey-level, deterministic)')
     .option('--env <name>', 'environment from config "environments" (base URL + headers; prod is read-only)')
     .option('--grep <pattern>', 'only tests whose id, name or a tag matches (substring or /regex/)')

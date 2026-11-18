@@ -260,7 +260,7 @@ Limits: storageState files contain live session cookies (protect `data/` like th
 ```bash
 # cross-browser + device emulation (Playwright presets); one result per journey × target
 agentic-e2e run https://shop.example --browser chromium firefox webkit --device 'iPhone 15' 'Pixel 7'
-# parallelism, retries, CI sharding (journey-level, deterministic: shard i of n of the sorted test ids)
+# parallelism, retries (run/heal/all: Playwright retries; `ci` re-runs failures as separate retry runs), CI sharding (journey-level, deterministic: shard i of n of the sorted test ids)
 agentic-e2e run https://shop.example --workers 4 --retries 2 --shard 1/4
 # same stored journeys, another environment (base URL + headers from the config); prod is read-only
 agentic-e2e run https://shop.example --env staging

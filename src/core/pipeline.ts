@@ -134,7 +134,8 @@ export async function generate(ctx: Context, url: string, opts: { regenerate?: b
   return { site: d.site, journeys: d.journeys, result, reusedJourneys: d.reused };
 }
 
-export async function run(ctx: Context, url: string, opts: { journeyIds?: string[]; kind?: RunRecord['kind'] } = {}): Promise<RunRecord> {
+/** `playwrightRetries` overrides `config.retries` for this run (SPEC-011 `ci` retries with separate runs, so it passes 0). */
+export async function run(ctx: Context, url: string, opts: { journeyIds?: string[]; kind?: RunRecord['kind']; playwrightRetries?: number } = {}): Promise<RunRecord> {
   const meta = normalizeSite(url);
   const { store, config } = ctx;
   const env = ctx.environment;
@@ -156,7 +157,8 @@ export async function run(ctx: Context, url: string, opts: { journeyIds?: string
     ids = ids.filter((id) => !destructive.includes(id));
     if (destructive.length && !ids.length) throw new Error(`No runnable tests for site ${meta.id}: every selected journey is destructive and environment "${env.name}" is read-only`);
   }
-  const shard = config.shard && opts.kind !== 'heal-rerun' ? parseShard(config.shard) : undefined;
+  // Only primary runs are sharded; retry / heal re-runs target ids that are already in this shard.
+  const shard = config.shard && (opts.kind ?? 'run') === 'run' ? parseShard(config.shard) : undefined;
   const needsAuth = (id: string) => !!journeys.get(id)?.requiresAuth;
   if (!user) {
     for (const id of ids.filter(needsAuth)) ctx.onProgress({ type: 'warn', stage: 'run', message: `Skipping "${id}": it requires a logged-in user (enable logged-in mode with --auth)` });
@@ -183,7 +185,7 @@ export async function run(ctx: Context, url: string, opts: { journeyIds?: string
     return runTests(store, {
       site: meta.id, baseUrl: env?.baseUrl ?? meta.origin, journeyIds: ids, screenshots: config.screenshots, fullPage: config.fullPage,
       headless: config.headless, testTimeoutMs: config.testTimeoutMs, kind: opts.kind, onProgress: ctx.onProgress,
-      targets: resolveTargets(config), workers: config.workers, retries: config.retries, globalTimeoutMs: config.globalTimeoutMs || undefined,
+      targets: resolveTargets(config), workers: config.workers, retries: opts.playwrightRetries ?? config.retries, globalTimeoutMs: config.globalTimeoutMs || undefined,
       journeyTimeouts, trace: config.trace, video: config.video,
       ...(env ? { env: { name: env.name, baseUrl: env.baseUrl, headers: env.headers } } : {}),
       meta: { ...(shard ? { shard } : {}), ...(hasFilter(filters) ? { filters } : {}) },
