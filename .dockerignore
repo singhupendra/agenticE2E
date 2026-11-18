@@ -1,0 +1,22 @@
+# SPEC-014: keep data and secrets out of the build context (and therefore out of every image layer).
+.git
+node_modules
+dist
+web/dist
+data
+.agentic-e2e
+.auth
+credentials*.json
+!credentials.example.json
+*.credentials.json
+tokens*.json
+**/tokens*.json
+**/storageState*.json
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+coverage
+test-results
+playwright-report

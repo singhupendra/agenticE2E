@@ -88,7 +88,7 @@ Prefer a UI?
 
 ```bash
 pnpm build
-node bin/agentic-e2e.js serve             # open http://localhost:4173
+node bin/agentic-e2e.js serve --insecure-local   # open http://localhost:4173 (no auth, localhost only; see Deployment & security)
 ```
 
 ## CLI
@@ -112,7 +112,9 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `list` | known sites with journey/test/run counts |
 | `list-test-cases <url>` | the stored generated tests of one site: journey id, name, journey status (as stored), latest run outcome (`passed`/`failed`/`healed`/`skipped`/`never run`, with timestamp) and spec file path, and an `AUTH` column (the user a logged-in journey runs as, `-` otherwise). `--json` for machine-readable output (`{site, dataDir, tests[]}`; tests carry `requiresAuth`/`user`). Exits 1 for an unknown site; exits 0 with a message when the site has no generated tests yet. Read-only, no LLM credentials needed |
 | `ci <url>` | non-interactive CI run of **stored** tests (never discovers, generates or prompts). `--retries <n>` re-runs failures without the LLM, `--allow-heal` heals what still fails (otherwise no LLM call and no spec is modified). Documented exit codes, reports, job summary and notifications — see [Reports & CI](#reports--ci) |
-| `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`) |
+| `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`, `--tokens-file <f>`, `--insecure-local`); needs API tokens unless `--insecure-local` |
+| `token create\|hash\|list` | manage API tokens (only hashes are stored) |
+| `config validate\|show` | strict config check (did-you-mean hints) / print the effective config |
 
 Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--aws-profile <name>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`, and for logged-in testing `--auth`, `--user <name>`, `--credentials <file>`. Patterns are case-insensitive substrings, or `/regex/flags`.
 
@@ -298,15 +300,55 @@ export default {
 ## Web UI
 
 ```bash
-pnpm build && node bin/agentic-e2e.js serve        # http://localhost:4173
-# or for UI development: pnpm dev:server  (API on :4173)  +  pnpm web:dev  (Vite on :5173, proxies /api)
+pnpm build && node bin/agentic-e2e.js serve --insecure-local   # http://localhost:4173
+# or for UI development: AGENTIC_E2E_INSECURE_LOCAL=1 pnpm dev:server  (API on :4173)  +  pnpm web:dev  (Vite on :5173, proxies /api)
 ```
 
 With **Logged-in testing** ticked (enabled only when the credentials file has the URL's site) and a user picked (names only), every action runs as that user. Enter a URL, adjust settings (screenshot mode, full-page, limits, filters…), and trigger Discover / Generate / Run / Heal / Run all. Progress streams live (SSE). Per site you get tabs for **journeys** (inline edit, approve/reject, save), **code** (current + original/healed versions), **runs** (results, errors, traces, screenshots), **tests** (every stored test with its latest outcome and a checkbox; **Heal selected** and **Heal all failed** start a heal job for just those tests and refresh the heals tab when done), **heals** (verdict, reason, attempts, diff; for failed heals the last error and the candidate patch) and **screenshots** (gallery).
 
-> ⚠️ The server executes LLM-generated Playwright tests and spends API credits. It binds to `127.0.0.1` and rejects cross-origin mutating requests; do not expose it publicly or add auth-less port forwarding.
+> ⚠️ The server executes LLM-generated Playwright tests and spends API credits. It binds to `127.0.0.1`, rejects cross-origin mutating requests and requires API tokens unless you opt into `--insecure-local` (loopback only). See [Deployment & security](#deployment--security) before exposing it.
 
 REST API (all JSON): `GET /api/config`, `GET /api/aws-profiles`, `GET /api/auth?url=` (`{configured, users[]}`: names only), `GET /api/models`, `GET /api/sites`, `GET /api/sites/:site`, `PUT /api/sites/:site/journeys`, `GET /api/sites/:site/test-cases`, `GET /api/sites/:site/tests/:id`, `GET /api/sites/:site/runs/:runId`, `GET /api/sites/:site/files/(screenshots|runs)/…`, `POST /api/jobs` `{action, url, options?, journeyIds?, failedOnly?, rediscover?, regenerate?}` (for `heal`, `journeyIds` / `failedOnly` select the tests to heal; unknown ids → `400 {error, validIds, unknownIds}`, `failedOnly` with nothing failing → a job that finishes with `result.noneFailing: true`), `GET /api/jobs/:id`, `GET /api/jobs/:id/events` (SSE).
+
+## Deployment & security
+
+**API tokens and roles.** `serve` requires API tokens (or the explicit `--insecure-local`, which only works on a loopback address and treats every request as admin).
+
+```bash
+agentic-e2e token create --name alice --role admin --file .agentic-e2e/tokens.json   # prints the token ONCE; stores only sha256
+agentic-e2e serve --tokens-file .agentic-e2e/tokens.json        # or AGENTIC_E2E_API_TOKENS_FILE / server.tokensFile
+# or inline hashes: AGENTIC_E2E_API_TOKENS="ci:operator:sha256:<hex>,alice:admin:sha256:<hex>"
+curl -H "Authorization: Bearer $TOKEN" http://localhost:4173/api/sites
+```
+
+| Role | Can |
+|------|-----|
+| `viewer` | read everything (`GET /api/*`) |
+| `operator` | + `run` and `heal` jobs (run-time options only: screenshots, headless, filters, heal attempts, logged-in user…) |
+| `admin` | + `discover`, `generate`, `all`, approve/reject/edit journeys, change settings (provider, model, AWS profile, limits…) per job |
+
+The web UI asks for a token and exchanges it for an `HttpOnly; SameSite=Strict` session cookie (`POST /api/session`; the token is never stored in the browser). Rotate a token by deleting its entry and creating a new one; raw tokens are never logged, stored or returned.
+
+**Hardening.** Security headers via `@fastify/helmet` (strict CSP, `frame-ancestors 'none'`, `no-referrer`, HSTS over https), rate limits via `@fastify/rate-limit` (default 300 req/min per IP, 10 login attempts/min), a request body limit (1 MiB), the Host allowlist (add hostnames with `server.allowedHosts` / `AGENTIC_E2E_ALLOWED_HOSTS`), `GET /healthz` (liveness), `GET /readyz` (readiness: storage writable, not draining) and graceful shutdown on SIGTERM/SIGINT (drain, wait up to `server.shutdownTimeoutMs` for running jobs). All of it lives in the `server` config block:
+
+```jsonc
+"server": { "allowedHosts": ["e2e.example.com"], "tokensFile": ".agentic-e2e/tokens.json", "bodyLimitBytes": 1048576,
+            "rateLimit": { "max": 300, "timeWindowMs": 60000, "loginMax": 10 }, "sessionTtlMs": 43200000,
+            "shutdownTimeoutMs": 30000, "trustProxy": false }
+```
+
+**Docker.** A multi-stage `Dockerfile` on the official Playwright image runs as the non-root `pwuser`; `docker-compose.yml` adds a named data volume, an `.env` file (see `.env.example`) and mounts the credentials file and the tokens file as read-only secrets under `/run/secrets` — they are never baked into the image (`.dockerignore` excludes `data/`, credentials, tokens and `.env`).
+
+```bash
+cp .env.example .env    # provider keys / settings
+agentic-e2e token create --name admin --role admin --file .agentic-e2e/tokens.json
+touch .agentic-e2e/credentials.json && chmod 600 .agentic-e2e/*.json   # {} if you don't test logged-in journeys
+docker compose up -d --build   # http://localhost:4173
+```
+
+**Config validation.** The config file is strict: `agentic-e2e config validate` reports unknown keys with a did-you-mean hint and type errors without echoing values; `agentic-e2e config show` prints the effective config (secret-bearing fields elided).
+
+**Storage backends.** `src/core/storage/` defines an async `StorageBackend` interface (`read/write/exists/stat/list/delete/createReadStream/healthCheck`) with a filesystem implementation (default) and `registerStorageBackend(kind, factory)` for others (e.g. S3). A new backend is done when it passes `test/helpers/storage-contract.ts`. The server already reads site files and runs its readiness probe through it.
 
 ## Data layout
 

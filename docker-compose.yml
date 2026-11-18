@@ -1,0 +1,45 @@
+# SPEC-014: run the agentic-e2e server in a container.
+#   1. cp .env.example .env            (non-secret settings + provider keys; .env is gitignored and dockerignored)
+#   2. agentic-e2e token create --name admin --role admin --file .agentic-e2e/tokens.json
+#   3. put site logins in .agentic-e2e/credentials.json (see credentials.example.json); chmod 600 both files
+#   4. docker compose up -d --build   → http://localhost:4173 (paste the token)
+# Secrets are mounted read-only under /run/secrets at runtime, never baked into the image.
+services:
+  agentic-e2e:
+    build: .
+    image: agentic-e2e:latest
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4173:4173"
+    env_file: .env
+    environment:
+      AGENTIC_E2E_DATA_DIR: /app/data
+      AGENTIC_E2E_CREDENTIALS: /run/secrets/credentials.json
+      AGENTIC_E2E_API_TOKENS_FILE: /run/secrets/api_tokens.json
+    secrets:
+      - source: credentials
+        target: credentials.json
+      - source: api_tokens
+        target: api_tokens.json
+    volumes:
+      - agentic-e2e-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/pwuser
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    stop_grace_period: 40s
+
+secrets:
+  credentials:
+    file: ./.agentic-e2e/credentials.json
+  api_tokens:
+    file: ./.agentic-e2e/tokens.json
+
+volumes:
+  agentic-e2e-data:
