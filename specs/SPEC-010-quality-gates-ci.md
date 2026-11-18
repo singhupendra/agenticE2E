@@ -53,7 +53,7 @@
 |----|-------------|
 | FR-9 | `eslint.config.js` (flat config): `@eslint/js` recommended + `typescript-eslint` recommended for `src`, `test`, `scripts`, `web/src`, config files; `eslint-plugin-react-hooks` for `web/src`; `eslint-config-prettier` last. Ignores `dist`, `web/dist`, `data`, `coverage`, `node_modules`. `pnpm lint` = `eslint .` with zero errors; `pnpm lint:fix` exists. |
 | FR-10 | `.prettierrc.json` matches the existing style (single quotes, semicolons, trailing commas, `printWidth` 120). `pnpm format` writes, `pnpm format:check` checks. `.prettierignore` excludes `pnpm-lock.yaml`, build output, `data/`, `coverage/`, and Markdown (`**/*.md` — hand-formatted tables, edited by many branches). |
-| FR-11 | Vitest coverage uses `@vitest/coverage-v8`, `include: ['src/**/*.ts']`, reporters `text-summary`, `html`, `json-summary`, `lcov`. Thresholds are the measured baseline minus ~2 points and never below 70 % lines: **lines 93, statements 90, branches 82, functions 88**. `pnpm test:coverage` = `vitest run --coverage`. `pnpm test:run` keeps running without coverage. |
+| FR-11 | Vitest coverage uses `@vitest/coverage-v8`, `include: ['src/**/*.ts']`, reporters `text-summary`, `html`, `json-summary`, `lcov`. Thresholds are the measured baseline minus ~2 points and never below 70 % lines: **lines 91, statements 90, branches 82, functions 88** (lines re-measured after the Prettier reformat, which spreads code over more lines: 93.7 %). `pnpm test:coverage` = `vitest run --coverage`. `pnpm test:run` keeps running without coverage. |
 | FR-12 | `package.json` has `"packageManager": "pnpm@10.33.0"`; the lockfile importer specifiers equal the `package.json` specifiers (fixes G-2). |
 
 ### 3.4 Repository hygiene

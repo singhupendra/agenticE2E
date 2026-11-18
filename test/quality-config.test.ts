@@ -143,6 +143,6 @@ describe('coverage thresholds (SPEC-010 AC-9)', () => {
     expect(cov.provider).toBe('v8');
     expect(cov.include).toEqual(['src/**/*.ts']);
     expect(cov.thresholds.lines).toBeGreaterThanOrEqual(70);
-    expect(cov.thresholds).toEqual({ lines: 93, statements: 90, branches: 82, functions: 88 });
+    expect(cov.thresholds).toEqual({ lines: 91, statements: 90, branches: 82, functions: 88 });
   });
 });
