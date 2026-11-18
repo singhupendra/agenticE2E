@@ -40,6 +40,30 @@ describe('SPEC-014 roles & tokens', () => {
     expect((await app.inject({ url: '/api/sites', headers: { authorization: `Basic ${T.admin}` } })).statusCode).toBe(401);
   });
 
+  it('AC-9: percent-encoded paths cannot bypass auth (routing decodes, auth must too)', async () => {
+    for (const url of ['/%61pi/sites', '/%61%70%69/sites', '/api/%73ites', '/%61pi/config']) {
+      expect((await app.inject(url)).statusCode, url).toBe(401);
+    }
+    const post = await app.inject({ method: 'POST', url: '/%61pi/jobs', headers: json, payload: { action: 'discover', url: 'http://roundtrip.test' } });
+    expect(post.statusCode).toBe(401);
+    const op = await app.inject({ method: 'POST', url: '/%61pi/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'discover', url: 'http://roundtrip.test' } });
+    expect(op.statusCode).toBe(403);
+    const put = await app.inject({ method: 'PUT', url: '/%61pi/sites/example.com/journeys', headers: { ...bearer('viewer'), ...json }, payload: [] });
+    expect(put.statusCode).toBe(403);
+  });
+
+  it('AC-9: with the web UI mounted, the UI is public but encoded API paths still need auth', async () => {
+    const web = fs.mkdtempSync(path.join(os.tmpdir(), 'web-'));
+    fs.writeFileSync(path.join(web, 'index.html'), '<!doctype html><title>ui</title>');
+    const withUi = await buildApp({ config: cfg(), webDir: web, auth: { mode: 'tokens', tokens: registry } });
+    expect((await withUi.inject('/')).statusCode).toBe(200);
+    expect((await withUi.inject('/some/spa/route')).statusCode).toBe(200);
+    expect((await withUi.inject('/%61pi/sites')).statusCode).toBe(401);
+    expect((await withUi.inject({ method: 'POST', url: '/%61pi/jobs', headers: json, payload: { action: 'run', url: 'http://a.test' } })).statusCode).toBe(401);
+    expect((await withUi.inject('/api/nope')).statusCode).toBe(404);
+    await withUi.close();
+  });
+
   it('AC-11: health, readiness, session status and UI paths are public', async () => {
     expect((await app.inject('/healthz')).statusCode).toBe(200);
     expect((await app.inject('/readyz')).statusCode).toBe(200);
@@ -167,6 +191,7 @@ describe('SPEC-014 hardening', () => {
     const app2 = await buildApp({ config: cfg({ rateLimit: { max: 100, timeWindowMs: 60_000, loginMax: 2 } }), webDir: noWeb(), auth: { mode: 'tokens', tokens: registry } });
     const login = () => app2.inject({ method: 'POST', url: '/api/session', headers: json, payload: { token: 'wrong' } });
     expect([(await login()).statusCode, (await login()).statusCode, (await login()).statusCode]).toEqual([401, 401, 429]);
+    expect((await app2.inject({ method: 'POST', url: '/%61pi/session', headers: json, payload: { token: 'wrong' } })).statusCode).toBe(429);
     await app2.close();
   });
 
@@ -197,6 +222,7 @@ describe('SPEC-014 health & lifecycle', () => {
     expect(r.statusCode).toBe(503);
     expect(r.json()).toEqual({ status: 'draining' });
     expect((await app.inject({ method: 'POST', url: '/api/jobs', headers: json, payload: { action: 'run', url: 'http://a.test' } })).statusCode).toBe(503);
+    expect((await app.inject({ method: 'POST', url: '/%61pi/jobs', headers: json, payload: { action: 'run', url: 'http://a.test' } })).statusCode).toBe(503);
     await app.close();
 
     const broken: StorageBackend = Object.assign(new FilesystemBackend(dataDir), { healthCheck: async () => { throw new Error(`EACCES ${dataDir}`); } });

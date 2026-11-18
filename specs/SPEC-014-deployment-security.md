@@ -57,6 +57,7 @@
 | ID | Requirement |
 |----|-------------|
 | FR-6 | Missing/invalid credentials → `401 {"error":"Authentication required"}` with `WWW-Authenticate: Bearer`. Insufficient role → `403 {"error":"Requires role <r>"}`. Neither response nor any log line contains the presented token. |
+| FR-6a | Public/role decisions use the **matched route pattern** (after the router percent-decodes the path), never the raw URL, so `/%61pi/jobs` is treated exactly like `/api/jobs`. Unmatched requests (static UI, 404) are public. |
 | FR-7 | Credentials: `Authorization: Bearer <token>` **or** the session cookie (FR-8). |
 | FR-8 | `POST /api/session` with a Bearer token (or `{ "token" }` body) creates an in-memory session (random 32-byte id, TTL `server.sessionTtlMs`, default 12 h) and sets cookie `ae2e_session` `HttpOnly; SameSite=Strict; Path=/` (+`Secure` over https). `GET /api/session` → `{ authRequired, authenticated, name?, role? }`. `DELETE /api/session` revokes it. This is how the web UI authenticates `EventSource`, images and downloads. CSRF stays covered by SameSite=Strict + the existing JSON content type + Origin checks. |
 | FR-9 | **Insecure local mode** is explicit: `serve --insecure-local` (or `startServer({ auth: { mode: 'insecure-local' } })`). It is refused unless the bind host is loopback (`127.0.0.1`, `localhost`, `::1`). Every request is then treated as `admin`; startup prints a warning. Without tokens and without `--insecure-local`, `serve` refuses to start with an error explaining both options. |
@@ -79,7 +80,7 @@
 |----|-------------|
 | FR-17 | The config file is strict: unknown keys (top level and in `server`) are errors with a "did you mean `<closest>`?" suggestion (Levenshtein ≤ 3). |
 | FR-18 | Errors list every issue as `<path>: <message> (expected …, got <type>)` with the source (`config file <name>`), never the value of a key (values can be secrets). |
-| FR-19 | `agentic-e2e config validate [--config f]` prints `Configuration OK (<file or defaults>)` and exits 0, or the error list and exits 1. `agentic-e2e config show` prints the effective merged config as JSON (env + file + CLI), with `server.tokens*` elided and never a token, hash or credential. |
+| FR-19 | `agentic-e2e config validate [--config f]` prints `Configuration OK (<file or defaults>)` and exits 0, or the error list and exits 1. `agentic-e2e config print [--redacted]` prints the effective merged config as JSON (env + file + CLI). It never prints a token or hash (inline `AGENTIC_E2E_API_TOKENS` shows as `tokensEnv: "(set)"`); `--redacted` also replaces the credentials and tokens file paths with `"(set)"`. |
 | FR-20 | `server` block: `{ allowedHosts: string[], tokensFile?, bodyLimitBytes, rateLimit: { max, timeWindowMs, loginMax }, sessionTtlMs, shutdownTimeoutMs, trustProxy }`, all with defaults. It is **not** overridable per job. |
 
 ### 3.5 Storage interface (`src/core/storage/`)
@@ -109,7 +110,7 @@
 
 - Raw API tokens exist only in the `token create` stdout and in the client. Hashes are stored; tokens/hashes are never logged, returned, or included in errors.
 - The `Authorization` header and `ae2e_session` cookie are never logged (`logger: false` stays; error handlers don't echo headers).
-- `config show` and `GET /api/config` never include `server`, tokens, credentials paths, or env var names.
+- `config print` and `GET /api/config` never include `server`, tokens, credentials paths, or env var names.
 - The image never contains credentials/tokens/data (`.dockerignore` + test), and they are mounted read-only at runtime.
 
 ## 5. Acceptance criteria (Given / When / Then)
@@ -125,7 +126,7 @@
 - AC-6: Given role viewer, when `GET /api/sites`, then 200; when `POST /api/jobs {action:"run"}`, then 403.
 - AC-7: Given role operator, when `POST /api/jobs {action:"run"}` with options equal to `/api/config`, then 202; when `{action:"discover"}`, then 403; when `{action:"run", options:{model:"other"}}`, then 403; when `PUT …/journeys`, then 403.
 - AC-8: Given role admin, when `POST /api/jobs {action:"discover"}` or `PUT …/journeys`, then not 401/403.
-- AC-9: Given auth mode tokens, when a request has no / an invalid Bearer token, then 401 with `WWW-Authenticate: Bearer` and the body does not echo the token.
+- AC-9: Given auth mode tokens, when a request has no / an invalid Bearer token, then 401 with `WWW-Authenticate: Bearer` and the body does not echo the token; percent-encoded API paths (`/%61pi/sites`, `POST /%61pi/jobs`) get the same 401/403 as the plain paths, with or without the web UI mounted.
 - AC-10: Given a valid token, when `POST /api/session`, then a `HttpOnly; SameSite=Strict` `ae2e_session` cookie is set and a subsequent cookie-only `GET /api/sites` is 200 and `GET /api/session` reports name and role; after `DELETE /api/session` the cookie is rejected (401).
 - AC-11: Given auth mode tokens, when `GET /healthz`, `/readyz`, `/api/health`, `GET /api/session`, then no auth is required.
 
@@ -145,7 +146,7 @@
 **Config**
 - AC-21: Given a config file with `maxPage: 3`, when validated, then the error says `maxPage: unknown key (did you mean "maxPages"?)`.
 - AC-22: Given `maxPages: "ten"`, then the error says `maxPages` expected number, got string, and does not include `ten`.
-- AC-23: `config validate` exits 0 with `Configuration OK` on a valid file and 1 with the error list on an invalid one; `config show` prints JSON without token data.
+- AC-23: `config validate` exits 0 with `Configuration OK` on a valid file and 1 with the error list on an invalid one; `config print --redacted` prints JSON without token data or secret paths; `config print` shows paths but never hashes.
 - AC-24: Given a job request with `options.server`, then it is rejected (400).
 
 **Storage**

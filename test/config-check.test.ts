@@ -71,7 +71,7 @@ describe('SPEC-014 config CLI', () => {
     expect(text).toMatch(/headless/);
   });
 
-  it('AC-23: config show prints JSON without token data', async () => {
+  it('AC-23: config print --redacted prints JSON without token data or secret paths', async () => {
     const f = path.join(dir, 'agentic-e2e.config.json');
     const tokensFile = path.join(dir, 'tokens.json');
     fs.writeFileSync(f, JSON.stringify({ maxPages: 7, server: { tokensFile } }));
@@ -79,7 +79,7 @@ describe('SPEC-014 config CLI', () => {
     const h = hashToken(generateToken());
     process.env.AGENTIC_E2E_API_TOKENS = `ci:viewer:${h}`;
     try {
-      expect(await main(['node', 'agentic-e2e', 'config', 'show', '--config', f])).toBe(0);
+      expect(await main(['node', 'agentic-e2e', 'config', 'print', '--redacted', '--config', f])).toBe(0);
     } finally {
       if (prev === undefined) delete process.env.AGENTIC_E2E_API_TOKENS; else process.env.AGENTIC_E2E_API_TOKENS = prev;
     }
@@ -89,5 +89,16 @@ describe('SPEC-014 config CLI', () => {
     expect(shown.server.tokensFile).toBe('(set)');
     expect(text).not.toContain(h);
     expect(text).not.toContain(tokensFile);
+    expect(shown.server.tokensEnv).toBe('(set)');
+  });
+
+  it('config print without --redacted shows paths but never token hashes', async () => {
+    const f = path.join(dir, 'agentic-e2e.config.json');
+    const tokensFile = path.join(dir, 'tokens.json');
+    fs.writeFileSync(f, JSON.stringify({ server: { tokensFile } }));
+    expect(await main(['node', 'agentic-e2e', 'config', 'print', '--config', f])).toBe(0);
+    const shown = JSON.parse(out.join('\n'));
+    expect(shown.server.tokensFile).toBe(tokensFile);
+    expect(out.join('\n')).not.toMatch(/sha256:/);
   });
 });

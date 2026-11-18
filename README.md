@@ -114,7 +114,7 @@ node bin/agentic-e2e.js all https://example.com  # after `pnpm build`  (or: pnpm
 | `ci <url>` | non-interactive CI run of **stored** tests (never discovers, generates or prompts). `--retries <n>` re-runs failures without the LLM, `--allow-heal` heals what still fails (otherwise no LLM call and no spec is modified). Documented exit codes, reports, job summary and notifications — see [Reports & CI](#reports--ci) |
 | `serve` | web UI + REST API (`--port 4173`, `--host 127.0.0.1`, `--tokens-file <f>`, `--insecure-local`); needs API tokens unless `--insecure-local` |
 | `token create\|hash\|list` | manage API tokens (only hashes are stored) |
-| `config validate\|show` | strict config check (did-you-mean hints) / print the effective config |
+| `config validate\|print [--redacted]` | strict config check (did-you-mean hints) / print the effective config |
 
 Common flags (all commands that take a URL): `--config <file>`, `--data-dir <dir>`, `--screenshots off|on-failure|every-step|end-of-journey`, `--full-page`, `--headed`, `--provider <anthropic|bedrock>`, `--model <id>`, `--aws-region <region>`, `--aws-profile <name>`, `--max-pages`, `--max-depth`, `--max-journeys`, `--include <pat…>`, `--exclude <pat…>`, `--heal-attempts <n>`, `--require-approval`, and for logged-in testing `--auth`, `--user <name>`, `--credentials <file>`. Patterns are case-insensitive substrings, or `/regex/flags`.
 
@@ -348,7 +348,7 @@ docker compose up -d --build   # http://localhost:4173
 
 On Linux, compose file-secrets keep their host owner: make them readable by the container user with `sudo chown 1001 .agentic-e2e/*.json` (keep `chmod 600`).
 
-**Config validation.** The config file is strict: `agentic-e2e config validate` reports unknown keys with a did-you-mean hint and type errors without echoing values; `agentic-e2e config show` prints the effective config (secret-bearing fields elided).
+**Config validation.** The config file is strict: `agentic-e2e config validate` reports unknown keys with a did-you-mean hint and type errors without echoing values; `agentic-e2e config print --redacted` prints the effective config (token data and secret paths elided; without `--redacted` paths are shown, tokens never).
 
 **Storage backends.** `src/core/storage/` defines an async `StorageBackend` interface (`read/write/exists/stat/list/delete/createReadStream/healthCheck`) with a filesystem implementation (default) and `registerStorageBackend(kind, factory)` for others (e.g. S3). A new backend is done when it passes `test/helpers/storage-contract.ts`. The server already reads site files and runs its readiness probe through it.
 

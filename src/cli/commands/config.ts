@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import { findConfigFile, loadConfig } from '../../core/config.js';
 import { ConfigError } from '../../core/config-check.js';
 
-/** SPEC-014 FR-19: `config validate` / `config show`. */
+/** SPEC-014 FR-19: `config validate` / `config print [--redacted]`. */
 export function registerConfigCommands(program: Command, setExit: (code: number) => void) {
   const cfg = program.command('config').description('validate or print the effective configuration (file + env + defaults)');
 
@@ -22,14 +22,21 @@ export function registerConfigCommands(program: Command, setExit: (code: number)
       }
     });
 
-  cfg.command('show').description('print the effective configuration as JSON (secret-bearing fields elided)')
+  cfg.command('print').description('print the effective configuration as JSON (never token values or hashes)')
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
-    .action(async (o: { config?: string }) => {
+    .option('--redacted', 'also hide secret-bearing paths (credentials file, tokens file) — use when sharing the output')
+    .action(async (o: { config?: string; redacted?: boolean }) => {
       const c = await loadConfig({ configFile: o.config });
+      const hide = (v: string | undefined) => (v && o.redacted ? '(set)' : v);
       const shown = {
         ...c,
-        ...(c.credentialsFile ? { credentialsFile: '(set)' } : {}),
-        server: { ...c.server, ...(c.server.tokensFile ? { tokensFile: '(set)' } : {}), ...(process.env.AGENTIC_E2E_API_TOKENS ? { tokensEnv: '(set)' } : {}) },
+        ...(c.credentialsFile ? { credentialsFile: hide(c.credentialsFile) } : {}),
+        server: {
+          ...c.server,
+          ...(c.server.tokensFile ? { tokensFile: hide(c.server.tokensFile) } : {}),
+          // inline token hashes are never printed, only whether they are configured
+          ...(process.env.AGENTIC_E2E_API_TOKENS ? { tokensEnv: '(set)' } : {}),
+        },
       };
       console.log(JSON.stringify(shown, null, 2));
     });

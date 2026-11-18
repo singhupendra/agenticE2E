@@ -26,10 +26,16 @@ declare module 'fastify' {
   interface FastifyRequest { principal?: Principal | null }
 }
 
-const pathOf = (url: string) => url.split('?')[0];
-const isPublic = (url: string) => {
-  const p = pathOf(url);
-  return p === '/healthz' || p === '/readyz' || PUBLIC_API.has(p) || !(p === '/api' || p.startsWith('/api/'));
+/**
+ * Every decision uses the *matched route pattern*, never the raw URL: the router percent-decodes the path, so a raw
+ * `/%61pi/jobs` reaches the `/api/jobs` route. Unmatched requests (static UI / 404) have no API route and are public.
+ */
+const routeOf = (req: FastifyRequest): string | undefined => req.routeOptions?.url;
+const HEALTH = new Set(['/healthz', '/readyz']);
+const isPublic = (req: FastifyRequest) => {
+  const r = routeOf(req);
+  if (r === undefined || HEALTH.has(r) || PUBLIC_API.has(r)) return true;
+  return !(r === '/api' || r.startsWith('/api/'));
 };
 
 function bearerOf(req: FastifyRequest): string | undefined {
@@ -106,7 +112,7 @@ export async function registerSecurity(app: FastifyInstance, opts: { config: Con
     max: server.rateLimit.max,
     timeWindow: server.rateLimit.timeWindowMs,
     keyGenerator: (req) => req.ip,
-    allowList: (req) => ['/healthz', '/readyz'].includes(pathOf(req.url)),
+    allowList: (req) => HEALTH.has(routeOf(req) ?? ''),
     errorResponseBuilder: (_req, ctx) => ({ statusCode: 429, error: 'Too many requests', message: `Rate limit exceeded; retry in ${ctx.after}` }),
   });
 
@@ -119,12 +125,12 @@ export async function registerSecurity(app: FastifyInstance, opts: { config: Con
   app.decorateRequest('principal', null);
   app.addHook('onRequest', async (req, reply) => {
     req.principal = principalOf(req);
-    if (opts.lifecycle.draining && req.method === 'POST' && pathOf(req.url) === '/api/jobs') return reply.code(503).send({ error: 'Server is shutting down' });
-    if (!isPublic(req.url) && !req.principal) return deny401(reply);
+    if (opts.lifecycle.draining && req.method === 'POST' && routeOf(req) === '/api/jobs') return reply.code(503).send({ error: 'Server is shutting down' });
+    if (!isPublic(req) && !req.principal) return deny401(reply);
   });
   app.addHook('preHandler', async (req, reply) => {
-    if (isPublic(req.url)) return;
-    const need = requiredRole(req.method, req.routeOptions.url, req.body, opts.config);
+    if (isPublic(req)) return;
+    const need = requiredRole(req.method, routeOf(req), req.body, opts.config);
     if (!roleAtLeast(req.principal!.role, need.role)) return reply.code(403).send({ error: `Requires role ${need.role}${need.reason ? ` for ${need.reason}` : ''}` });
   });
 
