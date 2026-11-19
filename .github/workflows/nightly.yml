@@ -43,7 +43,8 @@ jobs:
             exit 1
           fi
 
-      - run: pnpm exec playwright install --with-deps chromium
+      - name: Install Playwright browsers (any SPEC-012 --browser / --device target)
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
 
       - name: Materialise credentials file (outside the workspace, mode 600)
         env:

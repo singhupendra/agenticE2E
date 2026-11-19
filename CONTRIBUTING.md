@@ -7,7 +7,7 @@ Thanks for helping. This repo is **spec-driven** and every PR goes through the s
 
 ```bash
 pnpm install                              # Node 22.12+ (package.json engines); pnpm version is pinned by "packageManager" in package.json
-pnpm exec playwright install chromium     # needed by the integration tests
+pnpm exec playwright install chromium     # integration tests (add firefox webkit for SPEC-012 cross-browser runs)
 ```
 
 ## Workflow: spec → tests → code
@@ -27,7 +27,7 @@ Keep changes modular: new functionality goes into its own module (e.g. `src/core
 
 | Command | What it does |
 |---------|--------------|
-| `pnpm check:secrets` | Fails if `credentials*.json` (except `credentials.example.json`), `*.credentials.json`, `storageState*.json`, or anything under `.agentic-e2e/` / `.auth/` is tracked by git. Prints paths only. |
+| `pnpm check:secrets` | Fails if `credentials*.json` (except `credentials.example.json`), `*.credentials.json`, `storageState*.json`, `tokens*.json`, `.env` / `.env.*` (except `.env.example`), or anything under `.agentic-e2e/` / `.auth/` is tracked by git. Prints paths only. |
 | `pnpm typecheck` | `tsc` for the backend/CLI/tests and for the web UI |
 | `pnpm lint` / `pnpm lint:fix` | ESLint (`@eslint/js` + `typescript-eslint` recommended, React hooks rules for `web/src`) |
 | `pnpm format` / `pnpm format:check` | Prettier (single quotes, width 120; Markdown is not formatted) |

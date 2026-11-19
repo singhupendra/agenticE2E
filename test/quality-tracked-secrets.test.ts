@@ -37,6 +37,13 @@ describe('isForbiddenTrackedPath (SPEC-010 AC-1)', () => {
     'e2e-data/sites/example.com/auth/alice.json',
     'sites/shop.test_8080/auth/admin.json',
     'data/sites/shop/auth/alice.json',
+    // SPEC-014 secrets: API token hash files and env files
+    'tokens.json',
+    '.agentic-e2e/tokens.json',
+    'deploy/tokens.prod.json',
+    '.env',
+    '.env.local',
+    'docker/.env.production',
   ])('forbids %s', (p) => expect(isForbiddenTrackedPath(p)).toBe(true));
 
   it.each([
@@ -51,6 +58,12 @@ describe('isForbiddenTrackedPath (SPEC-010 AC-1)', () => {
     'e2e-data/sites/example.com/tests/login.spec.ts',
     'e2e-data/sites/example.com/journeys.json',
     'docs/auth/overview.json',
+    '.env.example',
+    '.dockerignore',
+    'src/core/security/tokens.ts',
+    'test/security-tokens.test.ts',
+    'docker-compose.yml',
+    'Dockerfile',
   ])('allows %s', (p) => expect(isForbiddenTrackedPath(p)).toBe(false));
 });
 

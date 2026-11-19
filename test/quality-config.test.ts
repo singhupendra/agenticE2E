@@ -8,7 +8,14 @@ import vitestConfig from '../vitest.config.js';
 const root = packageRoot();
 const read = (rel: string) => fs.readFileSync(path.join(root, rel), 'utf8');
 const yamlOf = (rel: string): any => parse(read(rel));
-type Step = { name?: string; uses?: string; run?: string; with?: Record<string, unknown>; if?: string };
+type Step = {
+  name?: string;
+  uses?: string;
+  run?: string;
+  with?: Record<string, unknown>;
+  env?: Record<string, string>;
+  if?: string;
+};
 
 describe('CI workflow (SPEC-010 AC-5)', () => {
   const wf = yamlOf('.github/workflows/ci.yml');
@@ -46,7 +53,7 @@ describe('CI workflow (SPEC-010 AC-5)', () => {
       idx(runs('pnpm typecheck'), 'typecheck'),
       idx(runs('pnpm lint'), 'lint'),
       idx(runs('pnpm format:check'), 'format check'),
-      idx(runs('playwright install --with-deps chromium'), 'playwright browsers'),
+      idx(runs('playwright install --with-deps chromium firefox webkit'), 'playwright browsers (SPEC-012 targets)'),
       idx(runs('pnpm test:coverage'), 'tests with coverage'),
       idx(runs('pnpm web:build'), 'web build'),
     ];
@@ -68,6 +75,12 @@ describe('CI workflow (SPEC-010 AC-5)', () => {
 describe('nightly workflow (SPEC-010 AC-6)', () => {
   const text = read('.github/workflows/nightly.yml');
   const wf = yamlOf('.github/workflows/nightly.yml');
+
+  it('installs every SPEC-012 browser engine so --browser flags work', () => {
+    expect(steps.some((s) => (s.run ?? '').includes('playwright install --with-deps chromium firefox webkit'))).toBe(
+      true,
+    );
+  });
 
   it('uses a Node version that the CI matrix tests', () => {
     const matrix: string[] = yamlOf('.github/workflows/ci.yml').jobs.checks.strategy.matrix.node.map(String);
@@ -112,6 +125,30 @@ describe('nightly workflow (SPEC-010 AC-6)', () => {
     );
     expect(paths).toContain('!${{ env.DATA_DIR }}/**/auth/**');
     expect(text).not.toMatch(/echo[^\n]*secrets\./);
+  });
+});
+
+describe('gitleaks allowlist stays narrow (SPEC-010 FR-4)', () => {
+  const toml = read('.gitleaks.toml');
+  it('only path-allowlists the committed example files', () => {
+    const paths = [...toml.matchAll(/^paths\s*=\s*\[(.*)\]\s*$/gm)].flatMap((m) =>
+      [...m[1].matchAll(/'''(.*?)'''/g)].map((x) => x[1]),
+    );
+    expect(paths.sort()).toEqual(['^\\.env\\.example$', '^credentials\\.example\\.json$']);
+  });
+  it('allowlists fake test values only as exact, anchored literals', () => {
+    const regexes = [...toml.matchAll(/^regexes\s*=\s*\[(.*)\]\s*$/gm)].flatMap((m) =>
+      [...m[1].matchAll(/'''(.*?)'''/g)].map((x) => x[1]),
+    );
+    expect(regexes.length).toBeGreaterThan(0);
+    for (const r of regexes) expect(r).toMatch(/^\^[A-Za-z0-9-]+\$$/);
+  });
+  it('pins the gitleaks version in CI', () => {
+    expect(
+      yamlOf('.github/workflows/ci.yml').jobs['secret-scan'].steps.find((s: Step) =>
+        (s.uses ?? '').startsWith('gitleaks/'),
+      )?.env?.GITLEAKS_VERSION,
+    ).toMatch(/^\d+\.\d+\.\d+$/);
   });
 });
 

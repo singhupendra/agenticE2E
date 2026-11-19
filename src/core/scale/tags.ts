@@ -36,7 +36,7 @@ function textMatcher(pattern: string): (s: string) => boolean {
   const m = /^\/(.+)\/([a-z]*)$/.exec(pattern);
   if (m) {
     let re: RegExp;
-    try { re = new RegExp(m[1], m[2]); } catch (e) { throw new Error(`Invalid --grep regex ${pattern}: ${(e as Error).message}`); }
+    try { re = new RegExp(m[1], m[2]); } catch (e) { throw new Error(`Invalid --grep regex ${pattern}: ${(e as Error).message}`, { cause: e }); }
     return (s) => re.test(s);
   }
   const needle = pattern.toLowerCase();

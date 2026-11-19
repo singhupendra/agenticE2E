@@ -40,7 +40,7 @@ describe('SPEC-013 structured logging', () => {
   it('AC-3: pretty format is a readable single line', () => {
     const c = capture();
     createLogger({ level: 'info', format: 'pretty', stream: c.stream }).warn({ attempt: 2, status: 429 }, 'llm.retry');
-    expect(c.lines[0]).toMatch(/^\d\d:\d\d:\d\d\.\d{3} WARN  llm\.retry attempt=2 status=429\n$/);
+    expect(c.lines[0]).toMatch(/^\d\d:\d\d:\d\d\.\d{3} WARN {2}llm\.retry attempt=2 status=429\n$/);
   });
 
   it('defaults to warn + pretty', () => {

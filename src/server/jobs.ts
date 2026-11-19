@@ -93,6 +93,9 @@ export class JobManager {
     }
     // SPEC-012: createContext validates targets, shard and the env (incl. ${VAR} headers). Build it before the job is
     // registered so a bad option is a 400 and never leaves a job stuck in `running` (which would 409 the site forever).
+    // `let` on purpose: onProgress (below) may read `job` while createContext runs, before it is assigned; a `const`
+    // declared later would be in its temporal dead zone and throw.
+    // eslint-disable-next-line prefer-const
     let job: Job | undefined;
     const early: ProgressEvent[] = [];
     let ctx: ReturnType<typeof createContext>;

@@ -8,8 +8,15 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const FORBIDDEN_DIRS = new Set(['.agentic-e2e', '.auth']);
-const ALLOWED_BASENAMES = new Set(['credentials.example.json']);
-const FORBIDDEN_BASENAMES = [/^credentials.*\.json$/i, /\.credentials\.json$/i, /^storageState.*\.json$/i];
+const ALLOWED_BASENAMES = new Set(['credentials.example.json', '.env.example']);
+const FORBIDDEN_BASENAMES = [
+  /^credentials.*\.json$/i,
+  /\.credentials\.json$/i,
+  /^storageState.*\.json$/i,
+  // SPEC-014: API token hash files and env files (provider keys); mirrors .gitignore
+  /^tokens.*\.json$/i,
+  /^\.env(\..+)?$/,
+];
 
 export function isForbiddenTrackedPath(p: string): boolean {
   const segments = p.replace(/\\/g, '/').split('/').filter(Boolean);

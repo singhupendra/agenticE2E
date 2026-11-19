@@ -1,5 +1,6 @@
 import { firstLine, type RunReport } from './model.js';
 
+// eslint-disable-next-line no-control-regex -- stripping XML-invalid control characters is the point
 const INVALID_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
 export const xml = (s: unknown) => String(s ?? '').replace(INVALID_XML, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
 const secs = (ms: number) => (ms / 1000).toFixed(3);
