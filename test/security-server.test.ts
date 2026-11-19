@@ -21,13 +21,22 @@ const json = { 'content-type': 'application/json' };
 let dataDir: string;
 const cfg = (server: Record<string, unknown> = {}): Config => resolveConfig({ cli: { dataDir, server: serverSchema.parse(server) } });
 const noWeb = () => path.join(dataDir, 'no-web');
+/** Wait until every job the app started has finished, so no job outlives its test or the app (deterministic teardown). */
+async function settle(app: FastifyInstance, timeoutMs = 30_000) {
+  const lc = getLifecycle(app);
+  const deadline = Date.now() + timeoutMs;
+  while (lc.activeJobs() > 0) {
+    if (Date.now() > deadline) throw new Error(`${lc.activeJobs()} job(s) still running after ${timeoutMs}ms`);
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
 
 beforeAll(() => { dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sec-')); });
 
 describe('SPEC-014 roles & tokens', () => {
   let app: FastifyInstance;
   beforeAll(async () => { app = await buildApp({ config: cfg(), webDir: noWeb(), auth: { mode: 'tokens', tokens: registry } }); });
-  afterAll(async () => { await app.close(); });
+  afterAll(async () => { await settle(app); await app.close(); });
 
   it('AC-9: missing or invalid token → 401 with WWW-Authenticate, no echo', async () => {
     const none = await app.inject('/api/sites');
@@ -93,6 +102,7 @@ describe('SPEC-014 roles & tokens', () => {
     expect(model.statusCode).toBe(403);
     const put = await app.inject({ method: 'PUT', url: '/api/sites/example.com/journeys', headers: { ...bearer('operator'), ...json }, payload: [] });
     expect(put.statusCode).toBe(403);
+    await settle(app);
   });
 
   it('AC-7: operator may pick SPEC-011/012 run-time options (browsers, env, tags, retries…) but not report paths', async () => {
@@ -103,25 +113,30 @@ describe('SPEC-014 roles & tokens', () => {
     }
     expect((await run({ reportDir: '/tmp/x' })).statusCode).toBe(403);
     expect((await run({ reportDir: '/tmp/x' }, 'admin')).statusCode).toBe(202);
+    await settle(app);
   });
 
   it('AC-7: operator round-trips the UI settings (/api/config) with environments configured', async () => {
     const config = resolveConfig({ cli: { dataDir, server: serverSchema.parse({}), environments: { staging: { baseUrl: 'https://s.test', headers: { 'X-Secret': 'super-secret-value' } } } } as never });
     const envApp = await buildApp({ config, webDir: noWeb(), auth: { mode: 'tokens', tokens: registry } });
-    const options = (await envApp.inject({ url: '/api/config', headers: bearer('operator') })).json();
-    expect(options.environments).toBeDefined();
-    expect(JSON.stringify(options)).not.toContain('super-secret-value');
-    const run = await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'http://env-roundtrip.test', options } });
-    expect(run.statusCode, run.body).toBe(202);
-    const heal = await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'heal', url: 'http://env-roundtrip-2.test', options: { ...options, env: 'staging' } } });
-    expect(heal.statusCode, heal.body).toBe(202);
-    // a forged environments object is ignored by the job (server-only) and does not need admin
-    const forged = await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'http://env-roundtrip-3.test', options: { environments: { evil: { baseUrl: 'https://evil.test' } } } } });
-    expect(forged.statusCode).toBe(202);
-    // invalid requests never run: the handler rejects them (400) after authorisation by action
-    expect((await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'ftp://x', options: { model: 'other' } } })).statusCode).toBe(400);
-    expect((await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'http://env-roundtrip-4.test', options: { model: 'other' } } })).statusCode).toBe(403);
-    await envApp.close();
+    try {
+      const options = (await envApp.inject({ url: '/api/config', headers: bearer('operator') })).json();
+      expect(options.environments).toBeDefined();
+      expect(JSON.stringify(options)).not.toContain('super-secret-value');
+      const run = await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'http://env-roundtrip.test', options } });
+      expect(run.statusCode, run.body).toBe(202);
+      const heal = await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'heal', url: 'http://env-roundtrip-2.test', options: { ...options, env: 'staging' } } });
+      expect(heal.statusCode, heal.body).toBe(202);
+      // a forged environments object is ignored by the job (server-only) and does not need admin
+      const forged = await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'http://env-roundtrip-3.test', options: { environments: { evil: { baseUrl: 'https://evil.test' } } } } });
+      expect(forged.statusCode).toBe(202);
+      // invalid requests never run: the handler rejects them (400) after authorisation by action
+      expect((await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'ftp://x', options: { model: 'other' } } })).statusCode).toBe(400);
+      expect((await envApp.inject({ method: 'POST', url: '/api/jobs', headers: { ...bearer('operator'), ...json }, payload: { action: 'run', url: 'http://env-roundtrip-4.test', options: { model: 'other' } } })).statusCode).toBe(403);
+    } finally {
+      await settle(envApp);
+      await envApp.close();
+    }
   });
 
   it('AC-8: admin passes authorisation for discover and journey edits', async () => {
