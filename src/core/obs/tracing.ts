@@ -25,12 +25,24 @@ const H0 = process.hrtime.bigint();
 /** Wall-clock anchored, monotonic nanoseconds. */
 const nowNs = () => (T0_NS + (process.hrtime.bigint() - H0)).toString();
 
-const NOOP_SPAN: Span = { traceId: '0'.repeat(32), spanId: '0'.repeat(16), setAttributes() {}, recordError() {}, end() {} };
+const NOOP_SPAN: Span = {
+  traceId: '0'.repeat(32),
+  spanId: '0'.repeat(16),
+  setAttributes() {},
+  recordError() {},
+  end() {},
+};
 const NOOP_TRACER: Tracer = { enabled: false, startSpan: () => NOOP_SPAN, flush: async () => {} };
 
 interface OtlpSpan {
-  traceId: string; spanId: string; parentSpanId?: string; name: string; kind: number;
-  startTimeUnixNano: string; endTimeUnixNano?: string; attributes: { key: string; value: Record<string, unknown> }[];
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  name: string;
+  kind: number;
+  startTimeUnixNano: string;
+  endTimeUnixNano?: string;
+  attributes: { key: string; value: Record<string, unknown> }[];
   status: { code: number; message?: string };
 }
 
@@ -42,7 +54,13 @@ export function parseOtlpHeaders(raw: string | undefined): Record<string, string
     if (i <= 0) continue;
     const k = pair.slice(0, i).trim();
     const v = pair.slice(i + 1).trim();
-    if (k) { try { out[k] = decodeURIComponent(v); } catch { out[k] = v; } }
+    if (k) {
+      try {
+        out[k] = decodeURIComponent(v);
+      } catch {
+        out[k] = v;
+      }
+    }
   }
   return out;
 }
@@ -60,32 +78,63 @@ export function tracesEndpoint(env: Record<string, string | undefined>): string 
  * SPEC-013 FR-26/27: minimal OTLP/HTTP JSON trace exporter. Off (no-op) unless an OTLP endpoint env var is set.
  * Attribute values and error messages pass through `redactor` before export.
  */
-export function createTracer(opts: { env?: Record<string, string | undefined>; fetch?: typeof fetch; redactor?: Redactor; log?: Logger } = {}): Tracer {
+export function createTracer(
+  opts: { env?: Record<string, string | undefined>; fetch?: typeof fetch; redactor?: Redactor; log?: Logger } = {},
+): Tracer {
   const env = opts.env ?? process.env;
   const endpoint = tracesEndpoint(env);
   if (!endpoint) return NOOP_TRACER;
   const doFetch = opts.fetch ?? fetch;
   const redactor = opts.redactor ?? Redactor.empty();
-  const headers = { ...parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_HEADERS), ...parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_TRACES_HEADERS) };
+  const headers = {
+    ...parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_HEADERS),
+    ...parseOtlpHeaders(env.OTEL_EXPORTER_OTLP_TRACES_HEADERS),
+  };
   const serviceName = env.OTEL_SERVICE_NAME?.trim() || 'agentic-e2e';
   let done: OtlpSpan[] = [];
 
   const toAttr = (key: string, v: AttrValue) => ({
     key,
-    value: typeof v === 'boolean' ? { boolValue: v } : typeof v === 'number' ? (Number.isInteger(v) ? { intValue: String(v) } : { doubleValue: v }) : { stringValue: redactor.redact(v) },
+    value:
+      typeof v === 'boolean'
+        ? { boolValue: v }
+        : typeof v === 'number'
+          ? Number.isInteger(v)
+            ? { intValue: String(v) }
+            : { doubleValue: v }
+          : { stringValue: redactor.redact(v) },
   });
 
   const tracer: Tracer = {
     enabled: true,
     startSpan(name, o = {}) {
       const traceId = o.parent?.traceId ?? (o.traceId && /^[0-9a-f]{32}$/.test(o.traceId) ? o.traceId : hex(16));
-      const s: OtlpSpan = { traceId, spanId: hex(8), ...(o.parent ? { parentSpanId: o.parent.spanId } : {}), name: redactor.redact(name), kind: o.parent ? 1 : 2, startTimeUnixNano: nowNs(), attributes: [], status: { code: 0 } };
+      const s: OtlpSpan = {
+        traceId,
+        spanId: hex(8),
+        ...(o.parent ? { parentSpanId: o.parent.spanId } : {}),
+        name: redactor.redact(name),
+        kind: o.parent ? 1 : 2,
+        startTimeUnixNano: nowNs(),
+        attributes: [],
+        status: { code: 0 },
+      };
       let ended = false;
       const span: Span = {
-        traceId, spanId: s.spanId,
-        setAttributes(a) { for (const [k, v] of Object.entries(a)) if (v !== undefined) s.attributes.push(toAttr(k, v)); },
-        recordError(e) { s.status = { code: 2, message: redactor.redact((e as Error)?.message ?? String(e)) }; },
-        end() { if (ended) return; ended = true; s.endTimeUnixNano = nowNs(); done.push(s); },
+        traceId,
+        spanId: s.spanId,
+        setAttributes(a) {
+          for (const [k, v] of Object.entries(a)) if (v !== undefined) s.attributes.push(toAttr(k, v));
+        },
+        recordError(e) {
+          s.status = { code: 2, message: redactor.redact((e as Error)?.message ?? String(e)) };
+        },
+        end() {
+          if (ended) return;
+          ended = true;
+          s.endTimeUnixNano = nowNs();
+          done.push(s);
+        },
       };
       if (o.attributes) span.setAttributes(o.attributes);
       return span;
@@ -94,9 +143,20 @@ export function createTracer(opts: { env?: Record<string, string | undefined>; f
       if (!done.length) return;
       const spans = done;
       done = [];
-      const body = { resourceSpans: [{ resource: { attributes: [toAttr('service.name', serviceName)] }, scopeSpans: [{ scope: { name: 'agentic-e2e' }, spans }] }] };
+      const body = {
+        resourceSpans: [
+          {
+            resource: { attributes: [toAttr('service.name', serviceName)] },
+            scopeSpans: [{ scope: { name: 'agentic-e2e' }, spans }],
+          },
+        ],
+      };
       try {
-        const res = await doFetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) });
+        const res = await doFetch(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...headers },
+          body: JSON.stringify(body),
+        });
         if (!res.ok) opts.log?.warn({ status: res.status, spans: spans.length }, 'otel.export_failed');
       } catch (e) {
         opts.log?.warn({ error: (e as Error).message, spans: spans.length }, 'otel.export_failed');

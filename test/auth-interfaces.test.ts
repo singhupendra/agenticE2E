@@ -15,8 +15,13 @@ import { fixtureCreds, writeCreds } from './helpers/credentials.js';
 
 let fx: Fixture;
 let host = '';
-beforeAll(async () => { fx = await startFixtureSite(); host = normalizeSite(fx.url).id; });
-afterAll(async () => { await fx.close(); });
+beforeAll(async () => {
+  fx = await startFixtureSite();
+  host = normalizeSite(fx.url).id;
+});
+afterAll(async () => {
+  await fx.close();
+});
 
 describe('server (AC-20)', () => {
   let app: FastifyInstance, dataDir: string, store: Store;
@@ -24,11 +29,17 @@ describe('server (AC-20)', () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-srv-'));
     const credentialsFile = writeCreds(fixtureCreds(host));
     const config = resolveConfig({ cli: { dataDir, credentialsFile, maxPages: 3, maxDepth: 1 } });
-    const llm = new MockLLM((req) => (req.name === 'propose_journeys' ? { journeys: [{ name: 'Browse', goal: 'g', priority: 'high', steps: ['open'] }] } : { ranked: [{ id: 'browse', rationale: 'r' }] }));
+    const llm = new MockLLM((req) =>
+      req.name === 'propose_journeys'
+        ? { journeys: [{ name: 'Browse', goal: 'g', priority: 'high', steps: ['open'] }] }
+        : { ranked: [{ id: 'browse', rationale: 'r' }] },
+    );
     app = await buildApp({ config, llm, webDir: path.join(dataDir, 'no-web') });
     store = new Store(dataDir);
   });
-  afterAll(async () => { await app.close(); });
+  afterAll(async () => {
+    await app.close();
+  });
 
   it('GET /api/auth returns configured + user names only', async () => {
     const res = await app.inject(`/api/auth?url=${encodeURIComponent(fx.url)}`);
@@ -49,13 +60,23 @@ describe('server (AC-20)', () => {
   });
 
   it('jobs accept auth/authUser but never a credentials path', () => {
-    expect(parseJobRequest({ action: 'run', url: fx.url, options: { auth: true, authUser: 'member' } }).options).toEqual({ auth: true, authUser: 'member' });
-    expect(() => parseJobRequest({ action: 'run', url: fx.url, options: { credentialsFile: '/etc/passwd' } })).toThrow(/Invalid options/);
-    expect(() => parseJobRequest({ action: 'run', url: fx.url, options: { authUser: '../../x' } })).toThrow(/Invalid options/);
+    expect(
+      parseJobRequest({ action: 'run', url: fx.url, options: { auth: true, authUser: 'member' } }).options,
+    ).toEqual({ auth: true, authUser: 'member' });
+    expect(() => parseJobRequest({ action: 'run', url: fx.url, options: { credentialsFile: '/etc/passwd' } })).toThrow(
+      /Invalid options/,
+    );
+    expect(() => parseJobRequest({ action: 'run', url: fx.url, options: { authUser: '../../x' } })).toThrow(
+      /Invalid options/,
+    );
   });
 
   it('a job with auth for an unconfigured user is rejected up front, naming no secrets', async () => {
-    const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: fx.url, options: { auth: true, authUser: 'ghost' } } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/jobs',
+      payload: { action: 'discover', url: fx.url, options: { auth: true, authUser: 'ghost' } },
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toMatch(/unknown user/i);
     expect(res.body).not.toContain(FIXTURE_PASSWORD);
@@ -69,7 +90,11 @@ describe('server (AC-20)', () => {
   });
 
   it('job events and results never contain the secrets (auth discover job)', async () => {
-    const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: fx.url + '/account', options: { auth: true, screenshots: 'off' } } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/jobs',
+      payload: { action: 'discover', url: fx.url + '/account', options: { auth: true, screenshots: 'off' } },
+    });
     expect(res.statusCode).toBe(202);
     const ev = await app.inject(`/api/jobs/${res.json().jobId}/events`);
     expect(ev.body).not.toContain(FIXTURE_PASSWORD);
@@ -85,9 +110,14 @@ describe('cli (AC-21)', () => {
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-cli-'));
     credentialsFile = writeCreds(fixtureCreds(host));
-    out = []; err = [];
-    vi.spyOn(console, 'log').mockImplementation((...a) => { out.push(a.join(' ')); });
-    vi.spyOn(console, 'error').mockImplementation((...a) => { err.push(a.join(' ')); });
+    out = [];
+    err = [];
+    vi.spyOn(console, 'log').mockImplementation((...a) => {
+      out.push(a.join(' '));
+    });
+    vi.spyOn(console, 'error').mockImplementation((...a) => {
+      err.push(a.join(' '));
+    });
   });
   afterEach(() => vi.restoreAllMocks());
   const cli = (...args: string[]) => main(['node', 'agentic-e2e', ...args, '--data-dir', dir]);
@@ -121,10 +151,21 @@ describe('cli (AC-21)', () => {
     const s = new Store(dir);
     s.saveSite({ id: 'a.test', origin: 'https://a.test', url: 'https://a.test' });
     s.saveJourneys('a.test', [
-      { id: 'acct', name: 'Account', goal: 'g', priority: 'high', tags: [], steps: ['x'], status: 'selected', requiresAuth: true, user: 'member' },
+      {
+        id: 'acct',
+        name: 'Account',
+        goal: 'g',
+        priority: 'high',
+        tags: [],
+        steps: ['x'],
+        status: 'selected',
+        requiresAuth: true,
+        user: 'member',
+      },
       { id: 'home', name: 'Home', goal: 'g', priority: 'high', tags: [], steps: ['x'], status: 'selected' },
     ]);
-    s.saveTest('a.test', 'acct', 'x'); s.saveTest('a.test', 'home', 'x');
+    s.saveTest('a.test', 'acct', 'x');
+    s.saveTest('a.test', 'home', 'x');
     expect(await cli('list-test-cases', 'https://a.test')).toBe(0);
     const text = out.join('\n');
     expect(text).toMatch(/AUTH/);
@@ -132,7 +173,10 @@ describe('cli (AC-21)', () => {
     out.length = 0;
     expect(await cli('list-test-cases', 'https://a.test', '--json')).toBe(0);
     const j = JSON.parse(out.join('\n'));
-    expect(j.tests.find((t: { journeyId: string }) => t.journeyId === 'acct')).toMatchObject({ requiresAuth: true, user: 'member' });
+    expect(j.tests.find((t: { journeyId: string }) => t.journeyId === 'acct')).toMatchObject({
+      requiresAuth: true,
+      user: 'member',
+    });
   });
 });
 
@@ -152,38 +196,63 @@ describe('credentials errors never leak paths or env var names through the API (
       missing: path.join(os.tmpdir(), 'leak-check-dir-missing', 'credentials.json'),
       tracked,
       badJson: writeCreds('{ nope', { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-json-')) }),
-      envVar: writeCreds({ 'a.test': { users: { u: { username: `\${${secretVar}}`, password: 'ppp-ppp' } } } }, { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-env-')) }),
-      badShape: writeCreds({ 'a.test': { users: {} } }, { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-shape-')) }),
+      envVar: writeCreds(
+        { 'a.test': { users: { u: { username: `\${${secretVar}}`, password: 'ppp-ppp' } } } },
+        { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-env-')) },
+      ),
+      badShape: writeCreds(
+        { 'a.test': { users: {} } },
+        { dir: fs.mkdtempSync(path.join(os.tmpdir(), 'leak-check-dir-shape-')) },
+      ),
     };
   };
-  const leaks = (body: string, file: string) => [file, path.dirname(file), secretVar, 'git rm --cached'].filter((x) => body.includes(x));
+  const leaks = (body: string, file: string) =>
+    [file, path.dirname(file), secretVar, 'git rm --cached'].filter((x) => body.includes(x));
 
-  it.each(['missing', 'tracked', 'badJson', 'envVar', 'badShape'])('GET /api/auth (%s): generic error, no path / env var name', async (kind) => {
-    const file = brokenFiles()[kind];
-    const app = await appFor(file);
-    const res = await app.inject(`/api/auth?url=${encodeURIComponent('https://a.test')}`);
-    expect(res.json()).toMatchObject({ configured: false, users: [], error: 'credentials file could not be loaded' });
-    expect(leaks(res.body, file)).toEqual([]);
-    await app.close();
-  });
+  it.each(['missing', 'tracked', 'badJson', 'envVar', 'badShape'])(
+    'GET /api/auth (%s): generic error, no path / env var name',
+    async (kind) => {
+      const file = brokenFiles()[kind];
+      const app = await appFor(file);
+      const res = await app.inject(`/api/auth?url=${encodeURIComponent('https://a.test')}`);
+      expect(res.json()).toMatchObject({ configured: false, users: [], error: 'credentials file could not be loaded' });
+      expect(leaks(res.body, file)).toEqual([]);
+      await app.close();
+    },
+  );
 
-  it.each(['missing', 'tracked', 'badJson', 'envVar', 'badShape'])('POST /api/jobs auth (%s): 400 with a generic message, no path / env var name', async (kind) => {
-    const file = brokenFiles()[kind];
-    const app = await appFor(file);
-    const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: 'https://a.test', options: { auth: true } } });
-    expect(res.statusCode).toBe(400);
-    expect(res.json().error).toBe('credentials file could not be loaded');
-    expect(leaks(res.body, file)).toEqual([]);
-    await app.close();
-  });
+  it.each(['missing', 'tracked', 'badJson', 'envVar', 'badShape'])(
+    'POST /api/jobs auth (%s): 400 with a generic message, no path / env var name',
+    async (kind) => {
+      const file = brokenFiles()[kind];
+      const app = await appFor(file);
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/jobs',
+        payload: { action: 'discover', url: 'https://a.test', options: { auth: true } },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('credentials file could not be loaded');
+      expect(leaks(res.body, file)).toEqual([]);
+      await app.close();
+    },
+  );
 
   it('selection errors stay informative (names only) and path-free', async () => {
     const file = writeCreds(fixtureCreds('a.test'));
     const app = await appFor(file);
-    const res = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: 'https://a.test', options: { auth: true, authUser: 'ghost' } } });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/jobs',
+      payload: { action: 'discover', url: 'https://a.test', options: { auth: true, authUser: 'ghost' } },
+    });
     expect(res.statusCode).toBe(400);
     expect(res.json().error).toMatch(/unknown user.*ghost.*member/i);
-    const noSite = await app.inject({ method: 'POST', url: '/api/jobs', payload: { action: 'discover', url: 'https://other.test', options: { auth: true } } });
+    const noSite = await app.inject({
+      method: 'POST',
+      url: '/api/jobs',
+      payload: { action: 'discover', url: 'https://other.test', options: { auth: true } },
+    });
     expect(noSite.statusCode).toBe(400);
     expect(leaks(res.body + noSite.body, file)).toEqual([]);
     await app.close();
@@ -203,7 +272,12 @@ describe('credentials errors never leak paths or env var names through the API (
     const { createContext } = await import('../src/core/pipeline.js');
     const file = writeCreds(fixtureCreds('a.test'), { mode: 0o644 });
     const events: { message: string }[] = [];
-    createContext({ config: resolveConfig({ cli: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'x-')), credentialsFile: file, auth: true } }), onProgress: (e) => events.push(e) });
+    createContext({
+      config: resolveConfig({
+        cli: { dataDir: fs.mkdtempSync(path.join(os.tmpdir(), 'x-')), credentialsFile: file, auth: true },
+      }),
+      onProgress: (e) => events.push(e),
+    });
     const warn = events.find((e) => /chmod 600/.test(e.message));
     expect(warn).toBeDefined();
     expect(warn!.message).not.toContain(file);

@@ -10,9 +10,32 @@ import { validateSpec } from '../src/core/validate.js';
 import type { Journey, PageModel } from '../src/core/types.js';
 
 const PW = 'Zeta-9-pass-QX7';
-const redactor = new Redactor([{ value: PW, placeholder: '{{password}}' }, { value: 'member@example.test', placeholder: '{{username}}' }]);
-const journey: Journey = { id: 'confirm-pw', name: 'Confirm password', goal: 'g', priority: 'high', tags: [], steps: ['open settings'], status: 'selected', requiresAuth: true, user: 'member' };
-const page: PageModel = { url: 'http://x/account', path: '/account', title: 'My account', depth: 0, headings: ['Welcome'], ariaSnapshot: '', elements: [], forms: [], navLinks: [] };
+const redactor = new Redactor([
+  { value: PW, placeholder: '{{password}}' },
+  { value: 'member@example.test', placeholder: '{{username}}' },
+]);
+const journey: Journey = {
+  id: 'confirm-pw',
+  name: 'Confirm password',
+  goal: 'g',
+  priority: 'high',
+  tags: [],
+  steps: ['open settings'],
+  status: 'selected',
+  requiresAuth: true,
+  user: 'member',
+};
+const page: PageModel = {
+  url: 'http://x/account',
+  path: '/account',
+  title: 'My account',
+  depth: 0,
+  headings: ['Welcome'],
+  ariaSnapshot: '',
+  elements: [],
+  forms: [],
+  navLinks: [],
+};
 const CLEAN = `import { test, expect } from './_support';
 test('confirm', async ({ page, step, credentials }) => {
   await step('open', async () => { await page.goto('/account/settings'); });
@@ -47,13 +70,21 @@ describe('codegen secret rejection (AC-15, AC-16)', () => {
   it('generateSpec fails after retries if the LLM keeps emitting the value, without leaking it', async () => {
     const llm = new MockLLM(() => ({ code: LEAKY }));
     let msg = '';
-    try { await generateSpec(llm, { journey, pages: [page], baseUrl: 'http://x' }, { retries: 1, redactor }); } catch (e) { msg = (e as Error).message; }
+    try {
+      await generateSpec(llm, { journey, pages: [page], baseUrl: 'http://x' }, { retries: 1, redactor });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
     expect(msg).toMatch(/failed validation/);
     expect(msg).not.toContain(PW);
   }, 30_000);
   it('codegen prompt for an auth journey explains the credentials fixture and storageState, with placeholders only', async () => {
     const llm = new MockLLM(() => ({ code: CLEAN }));
-    await generateSpec(llm, { journey, pages: [page], baseUrl: 'http://x', auth: { user: 'member' } }, { retries: 0, redactor });
+    await generateSpec(
+      llm,
+      { journey, pages: [page], baseUrl: 'http://x', auth: { user: 'member' } },
+      { retries: 0, redactor },
+    );
     const { system, prompt } = llm.calls[0];
     expect(system + prompt).toMatch(/credentials\.(username|password)/);
     expect(system + prompt).toMatch(/already (logged|signed)/i);
@@ -75,7 +106,14 @@ describe('RedactingLLM (AC-22)', () => {
     const inner = new MockLLM(() => ({ code: `x ${PW}` }));
     const llm = new RedactingLLM(inner, redactor, { dropImages: true });
     const { codeSchema } = await import('../src/core/llm/schemas.js');
-    const out = await llm.structured({ name: 'n', description: 'd', system: `sys ${PW}`, prompt: `user member@example.test pw ${PW}`, schema: codeSchema, images: [{ mediaType: 'image/png', data: 'AAAA' }] });
+    const out = await llm.structured({
+      name: 'n',
+      description: 'd',
+      system: `sys ${PW}`,
+      prompt: `user member@example.test pw ${PW}`,
+      schema: codeSchema,
+      images: [{ mediaType: 'image/png', data: 'AAAA' }],
+    });
     expect(inner.calls[0].system).toBe('sys {{password}}');
     expect(inner.calls[0].prompt).toBe('user {{username}} pw {{password}}');
     expect(inner.calls[0].images).toBeUndefined();
@@ -84,13 +122,32 @@ describe('RedactingLLM (AC-22)', () => {
   it('keeps images when not dropping', async () => {
     const inner = new MockLLM(() => ({ code: 'c' }));
     const { codeSchema } = await import('../src/core/llm/schemas.js');
-    await new RedactingLLM(inner, redactor, { dropImages: false }).structured({ name: 'n', description: 'd', system: 's', prompt: 'p', schema: codeSchema, images: [{ mediaType: 'image/png', data: 'AAAA' }] });
+    await new RedactingLLM(inner, redactor, { dropImages: false }).structured({
+      name: 'n',
+      description: 'd',
+      system: 's',
+      prompt: 'p',
+      schema: codeSchema,
+      images: [{ mediaType: 'image/png', data: 'AAAA' }],
+    });
     expect(inner.calls[0].images).toHaveLength(1);
   });
 });
 
 describe('planner auth mode (AC-14)', () => {
-  const proposal = { journeys: [{ name: 'View account', goal: 'g', priority: 'high', steps: ['open account'], requiresAuth: true, user: 'member' }, { name: 'Browse', goal: 'g', priority: 'low', steps: ['open home'] }] };
+  const proposal = {
+    journeys: [
+      {
+        name: 'View account',
+        goal: 'g',
+        priority: 'high',
+        steps: ['open account'],
+        requiresAuth: true,
+        user: 'member',
+      },
+      { name: 'Browse', goal: 'g', priority: 'low', steps: ['open home'] },
+    ],
+  };
   it('auth mode: prompt names users, allows account journeys, keeps requiresAuth/user', async () => {
     const llm = new MockLLM(() => proposal);
     const js = await proposeJourneys(llm, [page], { auth: { user: 'member', userNames: ['member', 'admin'] } });

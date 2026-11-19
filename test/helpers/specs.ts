@@ -24,4 +24,6 @@ test('contact form', async ({ page, step }) => {
   await expect(page.getByRole('status')).toContainText('Thanks');
 });
 `;
-export const HEALED_SPEC = FAILING_SPEC.replace("getByLabel('Your full name')", "getByLabel('Name')").replace("click();", "click();").replace("fill('Ada')", "fill('Ada');\n    await page.getByLabel('Email').fill('ada@example.com')");
+export const HEALED_SPEC = FAILING_SPEC.replace("getByLabel('Your full name')", "getByLabel('Name')")
+  .replace('click();', 'click();')
+  .replace("fill('Ada')", "fill('Ada');\n    await page.getByLabel('Email').fill('ada@example.com')");

@@ -8,7 +8,10 @@ export const journeySchema = z.object({
   goal: z.string().min(1),
   priority: z.enum(['high', 'medium', 'low']),
   // SPEC-012: lower-cased, de-duplicated, invalid dropped (web journeys tab / --edit)
-  tags: z.array(z.string()).default([]).transform((t) => normalizeTags(t)),
+  tags: z
+    .array(z.string())
+    .default([])
+    .transform((t) => normalizeTags(t)),
   steps: z.array(z.string().min(1)).min(1),
   status: z.enum(['proposed', 'selected', 'approved', 'rejected']),
   rank: z.number().optional(),
@@ -21,7 +24,10 @@ export const journeySchema = z.object({
 /** Validate user-edited journeys (CLI --edit, REST PUT). */
 export function parseJourneys(input: unknown): Journey[] {
   const parsed = z.array(journeySchema).safeParse(input);
-  if (!parsed.success) throw new Error('Invalid journeys: ' + parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '));
+  if (!parsed.success)
+    throw new Error(
+      'Invalid journeys: ' + parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '),
+    );
   const ids = new Set<string>();
   for (const j of parsed.data) {
     if (ids.has(j.id)) throw new Error(`Invalid journeys: duplicate id "${j.id}"`);

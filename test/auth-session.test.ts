@@ -13,8 +13,13 @@ import { fixtureCreds, writeCreds } from './helpers/credentials.js';
 
 let fx: Fixture;
 let host = '';
-beforeAll(async () => { fx = await startFixtureSite(); host = normalizeSite(fx.url).id; });
-afterAll(async () => { await fx.close(); });
+beforeAll(async () => {
+  fx = await startFixtureSite();
+  host = normalizeSite(fx.url).id;
+});
+afterAll(async () => {
+  await fx.close();
+});
 
 function setup(opts: { creds?: unknown; llm?: MockLLM } = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-'));
@@ -27,16 +32,36 @@ const statePath = (dataDir: string) => path.join(dataDir, 'sites', host, 'auth',
 
 describe('isDestructiveLink (AC-13)', () => {
   it.each([
-    ['Log out', '/logout'], ['Sign out', '/x'], ['Delete account', '/account/delete'], ['Remove item', '/cart/remove/3'],
-    ['Cancel subscription', '/billing/cancel'], ['Deactivate', '/a'], ['Close my account', '/a'], ['Unsubscribe', '/u'], ['ok', '/signout'], ['x', '/users/1/delete?confirm=1'],
+    ['Log out', '/logout'],
+    ['Sign out', '/x'],
+    ['Delete account', '/account/delete'],
+    ['Remove item', '/cart/remove/3'],
+    ['Cancel subscription', '/billing/cancel'],
+    ['Deactivate', '/a'],
+    ['Close my account', '/a'],
+    ['Unsubscribe', '/u'],
+    ['ok', '/signout'],
+    ['x', '/users/1/delete?confirm=1'],
   ])('flags %s %s', (t, h) => expect(isDestructiveLink(t, h)).toBe(true));
-  it.each([['Settings', '/account/settings'], ['Orders', '/orders'], ['Deliveries', '/deliveries'], ['Blog', '/blog'], ['Cancellation policy', '/policies/cancel-info-faq']])('keeps %s', (t, h) => expect(isDestructiveLink(t, h)).toBe(false));
+  it.each([
+    ['Settings', '/account/settings'],
+    ['Orders', '/orders'],
+    ['Deliveries', '/deliveries'],
+    ['Blog', '/blog'],
+    ['Cancellation policy', '/policies/cancel-info-faq'],
+  ])('keeps %s', (t, h) => expect(isDestructiveLink(t, h)).toBe(false));
 });
 
 describe('isStateFresh (AC-10)', () => {
   const write = (cookies: { expires: number }[]) => {
     const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'st-')), 's.json');
-    fs.writeFileSync(f, JSON.stringify({ cookies: cookies.map((c, i) => ({ name: `c${i}`, value: 'v', domain: 'x', path: '/', ...c })), origins: [] }));
+    fs.writeFileSync(
+      f,
+      JSON.stringify({
+        cookies: cookies.map((c, i) => ({ name: `c${i}`, value: 'v', domain: 'x', path: '/', ...c })),
+        origins: [],
+      }),
+    );
     return f;
   };
   it('fresh with a session cookie or a future expiry', () => {
@@ -46,7 +71,8 @@ describe('isStateFresh (AC-10)', () => {
   it('stale when all cookies expired, file missing/corrupt, or older than max age', () => {
     expect(isStateFresh(write([{ expires: Date.now() / 1000 - 10 }]))).toBe(false);
     expect(isStateFresh(path.join(os.tmpdir(), 'nope-state.json'))).toBe(false);
-    const bad = write([]); fs.writeFileSync(bad, 'not json');
+    const bad = write([]);
+    fs.writeFileSync(bad, 'not json');
     expect(isStateFresh(bad)).toBe(false);
     expect(isStateFresh(write([{ expires: -1 }]), { now: Date.now() + 13 * 3600_000 })).toBe(false);
   });
@@ -90,7 +116,11 @@ describe('ensureSession (AC-9..AC-12)', () => {
     (bad[host].users.member as { password: string }).password = 'definitely-wrong-pw-1';
     const { ctx } = setup({ creds: bad });
     let msg = '';
-    try { await ensureSession(ctx, fx.url, { user: 'member' }); } catch (e) { msg = (e as Error).message; }
+    try {
+      await ensureSession(ctx, fx.url, { user: 'member' });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
     expect(msg).toMatch(/login failed/i);
     expect(msg).not.toContain('definitely-wrong-pw-1');
     expect(msg).not.toContain(FIXTURE_USER);
@@ -104,9 +134,16 @@ describe('ensureSession (AC-9..AC-12)', () => {
   it('AC-12: without hints the LLM locates the form; its prompt has placeholders only', async () => {
     const llm = new MockLLM((req) => {
       expect(req.name).toBe('locate_login_form');
-      return { usernameSelector: 'input[name=email]', passwordSelector: 'input[name=password]', submitSelector: 'button[type=submit]' };
+      return {
+        usernameSelector: 'input[name=email]',
+        passwordSelector: 'input[name=password]',
+        submitSelector: 'button[type=submit]',
+      };
     });
-    const { ctx, dataDir } = setup({ creds: { [host]: { users: { member: { username: FIXTURE_USER, password: FIXTURE_PASSWORD } } } }, llm });
+    const { ctx, dataDir } = setup({
+      creds: { [host]: { users: { member: { username: FIXTURE_USER, password: FIXTURE_PASSWORD } } } },
+      llm,
+    });
     const s = await ensureSession(ctx, fx.url, { user: 'member' });
     expect(s.reused).toBe(false);
     expect(fs.existsSync(statePath(dataDir))).toBe(true);
@@ -124,7 +161,13 @@ describe('authenticated crawl (AC-13)', () => {
     const { ctx } = setup();
     const s = await ensureSession(ctx, fx.url, { user: 'member' });
     const before = fx.hits.length;
-    const pages = await crawl(fx.url + '/account', { maxPages: 10, maxDepth: 2, timeoutMs: 30_000, headless: true, storageState: s.storageState });
+    const pages = await crawl(fx.url + '/account', {
+      maxPages: 10,
+      maxDepth: 2,
+      timeoutMs: 30_000,
+      headless: true,
+      storageState: s.storageState,
+    });
     const hits = fx.hits.slice(before);
     expect(pages.some((p) => p.title === 'My account')).toBe(true);
     expect(pages.some((p) => p.path === '/account/settings')).toBe(true);

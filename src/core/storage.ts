@@ -15,7 +15,8 @@ export function normalizeSite(input: string): SiteMeta & { host: string } {
   } catch {
     throw new Error(`Invalid URL: ${input}`);
   }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`Only http(s) URLs are supported, got ${u.protocol}`);
+  if (u.protocol !== 'http:' && u.protocol !== 'https:')
+    throw new Error(`Only http(s) URLs are supported, got ${u.protocol}`);
   const host = u.hostname.toLowerCase();
   const defaultPort = u.protocol === 'https:' ? '443' : '80';
   const port = u.port && u.port !== defaultPort ? u.port : '';
@@ -30,17 +31,26 @@ function readJson<T>(file: string): T | null {
 
 export class Store {
   /** SPEC-009: everything persisted goes through `redactor`, so a credential value can never land in data/. */
-  constructor(public readonly dataDir: string, private readonly redactor: Redactor = Redactor.empty()) {}
+  constructor(
+    public readonly dataDir: string,
+    private readonly redactor: Redactor = Redactor.empty(),
+  ) {}
 
-  redact(s: string): string { return this.redactor.redact(s); }
+  redact(s: string): string {
+    return this.redactor.redact(s);
+  }
   private writeJson(file: string, data: unknown) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, this.redactor.redact(JSON.stringify(data, null, 2)) + '\n');
   }
 
   /** Playwright storageState of a logged-in user (contains session cookies: gitignored, 0600, never served). */
-  authDir(site: string) { return path.join(this.siteDir(site), 'auth'); }
-  authStatePath(site: string, user: string) { return path.join(this.authDir(site), `${this.checkId(user, SAFE_RE)}.json`); }
+  authDir(site: string) {
+    return path.join(this.siteDir(site), 'auth');
+  }
+  authStatePath(site: string, user: string) {
+    return path.join(this.authDir(site), `${this.checkId(user, SAFE_RE)}.json`);
+  }
 
   siteDir(site: string): string {
     if (!SITE_RE.test(site) || site.includes('..')) throw new Error(`Invalid site id: ${JSON.stringify(site)}`);
@@ -50,11 +60,17 @@ export class Store {
     if (!re.test(id) || id.includes('..')) throw new Error(`Invalid id: ${JSON.stringify(id)}`);
     return id;
   }
-  testsDir(site: string) { return path.join(this.siteDir(site), 'tests'); }
-  testFile(site: string, id: string) { return path.join(this.testsDir(site), `${this.checkId(id)}.spec.ts`); }
+  testsDir(site: string) {
+    return path.join(this.siteDir(site), 'tests');
+  }
+  testFile(site: string, id: string) {
+    return path.join(this.testsDir(site), `${this.checkId(id)}.spec.ts`);
+  }
 
   /** True when a site directory exists in the data dir (never creates it). */
-  hasSite(site: string): boolean { return fs.existsSync(this.siteDir(site)); }
+  hasSite(site: string): boolean {
+    return fs.existsSync(this.siteDir(site));
+  }
 
   ensureSite(site: string) {
     const tests = this.testsDir(site);
@@ -66,19 +82,37 @@ export class Store {
   saveSite(meta: SiteMeta) {
     this.ensureSite(meta.id);
     const prev = this.loadSite(meta.id);
-    this.writeJson(path.join(this.siteDir(meta.id), 'site.json'), { ...prev, ...meta, updatedAt: new Date().toISOString() });
+    this.writeJson(path.join(this.siteDir(meta.id), 'site.json'), {
+      ...prev,
+      ...meta,
+      updatedAt: new Date().toISOString(),
+    });
   }
-  loadSite(site: string): SiteMeta | null { return readJson<SiteMeta>(path.join(this.siteDir(site), 'site.json')); }
+  loadSite(site: string): SiteMeta | null {
+    return readJson<SiteMeta>(path.join(this.siteDir(site), 'site.json'));
+  }
   listSites(): SiteMeta[] {
     const root = path.join(this.dataDir, 'sites');
     if (!fs.existsSync(root)) return [];
-    return fs.readdirSync(root).filter((d) => SITE_RE.test(d)).map((d) => this.loadSite(d)).filter((x): x is SiteMeta => !!x);
+    return fs
+      .readdirSync(root)
+      .filter((d) => SITE_RE.test(d))
+      .map((d) => this.loadSite(d))
+      .filter((x): x is SiteMeta => !!x);
   }
 
-  saveJourneys(site: string, journeys: Journey[]) { this.writeJson(path.join(this.siteDir(site), 'journeys.json'), journeys); }
-  loadJourneys(site: string): Journey[] | null { return readJson<Journey[]>(path.join(this.siteDir(site), 'journeys.json')); }
-  savePages(site: string, pages: PageModel[]) { this.writeJson(path.join(this.siteDir(site), 'pages.json'), pages); }
-  loadPages(site: string): PageModel[] | null { return readJson<PageModel[]>(path.join(this.siteDir(site), 'pages.json')); }
+  saveJourneys(site: string, journeys: Journey[]) {
+    this.writeJson(path.join(this.siteDir(site), 'journeys.json'), journeys);
+  }
+  loadJourneys(site: string): Journey[] | null {
+    return readJson<Journey[]>(path.join(this.siteDir(site), 'journeys.json'));
+  }
+  savePages(site: string, pages: PageModel[]) {
+    this.writeJson(path.join(this.siteDir(site), 'pages.json'), pages);
+  }
+  loadPages(site: string): PageModel[] | null {
+    return readJson<PageModel[]>(path.join(this.siteDir(site), 'pages.json'));
+  }
 
   saveTest(site: string, id: string, code: string) {
     this.ensureSite(site);
@@ -88,11 +122,17 @@ export class Store {
     const f = this.testFile(site, id);
     return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
   }
-  hasTest(site: string, id: string) { return fs.existsSync(this.testFile(site, id)); }
+  hasTest(site: string, id: string) {
+    return fs.existsSync(this.testFile(site, id));
+  }
   listTests(site: string): string[] {
     const d = this.testsDir(site);
     if (!fs.existsSync(d)) return [];
-    return fs.readdirSync(d).filter((f) => f.endsWith('.spec.ts')).map((f) => f.replace(/\.spec\.ts$/, '')).sort();
+    return fs
+      .readdirSync(d)
+      .filter((f) => f.endsWith('.spec.ts'))
+      .map((f) => f.replace(/\.spec\.ts$/, ''))
+      .sort();
   }
   private versionFile(site: string, id: string, name: string) {
     return path.join(this.testsDir(site), '.versions', this.checkId(id), `${this.checkId(name, SAFE_RE)}.spec.ts`);
@@ -108,14 +148,21 @@ export class Store {
   }
   listTestVersions(site: string, id: string): string[] {
     const d = path.dirname(this.versionFile(site, id, 'x'));
-    return fs.existsSync(d) ? fs.readdirSync(d).map((f) => f.replace(/\.spec\.ts$/, '')).sort() : [];
+    return fs.existsSync(d)
+      ? fs
+          .readdirSync(d)
+          .map((f) => f.replace(/\.spec\.ts$/, ''))
+          .sort()
+      : [];
   }
 
   appendHeal(site: string, rec: HealRecord) {
     const f = path.join(this.siteDir(site), 'heals.json');
     this.writeJson(f, [...(readJson<HealRecord[]>(f) ?? []), rec]);
   }
-  loadHeals(site: string): HealRecord[] { return readJson<HealRecord[]>(path.join(this.siteDir(site), 'heals.json')) ?? []; }
+  loadHeals(site: string): HealRecord[] {
+    return readJson<HealRecord[]>(path.join(this.siteDir(site), 'heals.json')) ?? [];
+  }
 
   createRun(site: string): { id: string; dir: string; screenshotsDir: string } {
     const base = new Date().toISOString().replace(/[:.]/g, '-');
@@ -125,13 +172,23 @@ export class Store {
     fs.mkdirSync(dir, { recursive: true });
     return { id, dir, screenshotsDir: path.join(this.siteDir(site), 'screenshots', id) };
   }
-  runDir(site: string, runId: string) { return path.join(this.siteDir(site), 'runs', this.checkId(runId, SAFE_RE)); }
-  saveRun(site: string, run: RunRecord) { this.writeJson(path.join(this.runDir(site, run.id), 'result.json'), run); }
-  loadRun(site: string, runId: string): RunRecord | null { return readJson<RunRecord>(path.join(this.runDir(site, runId), 'result.json')); }
+  runDir(site: string, runId: string) {
+    return path.join(this.siteDir(site), 'runs', this.checkId(runId, SAFE_RE));
+  }
+  saveRun(site: string, run: RunRecord) {
+    this.writeJson(path.join(this.runDir(site, run.id), 'result.json'), run);
+  }
+  loadRun(site: string, runId: string): RunRecord | null {
+    return readJson<RunRecord>(path.join(this.runDir(site, runId), 'result.json'));
+  }
   listRuns(site: string): RunRecord[] {
     const d = path.join(this.siteDir(site), 'runs');
     if (!fs.existsSync(d)) return [];
-    return fs.readdirSync(d).sort().map((r) => this.loadRun(site, r)).filter((x): x is RunRecord => !!x);
+    return fs
+      .readdirSync(d)
+      .sort()
+      .map((r) => this.loadRun(site, r))
+      .filter((x): x is RunRecord => !!x);
   }
 
   /** Resolve a relative path inside a site dir; throws on traversal. */

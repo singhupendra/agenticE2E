@@ -21,13 +21,21 @@ export interface AuthDeps {
   getLLM: () => LLMProvider;
   onProgress: ProgressFn;
 }
-export interface Session { user: string; storageState: string; reused: boolean }
+export interface Session {
+  user: string;
+  storageState: string;
+  reused: boolean;
+}
 
 export const SESSION_MAX_AGE_MS = 12 * 3600_000;
 const COMMON_LOGIN_PATHS = ['/login', '/signin', '/sign-in', '/account/login', '/users/sign_in'];
 
 /** Resolve the user a run uses (throws CredentialsError); `null` when auth mode is off. */
-export function authUserFor(deps: { config: Pick<Config, 'authUser'> & { auth?: boolean }; credentials: CredentialStore }, url: string, explicit?: string): ResolvedUser | null {
+export function authUserFor(
+  deps: { config: Pick<Config, 'authUser'> & { auth?: boolean }; credentials: CredentialStore },
+  url: string,
+  explicit?: string,
+): ResolvedUser | null {
   if (!deps.config.auth && explicit === undefined) return null;
   return deps.credentials.getUser(normalizeSite(url).id, explicit ?? deps.config.authUser);
 }
@@ -37,7 +45,10 @@ export function isStateFresh(file: string, opts: { now?: number; maxAgeMs?: numb
   const now = opts.now ?? Date.now();
   try {
     if (now - fs.statSync(file).mtimeMs > (opts.maxAgeMs ?? SESSION_MAX_AGE_MS)) return false;
-    const state = JSON.parse(fs.readFileSync(file, 'utf8')) as { cookies?: { expires?: number }[]; origins?: unknown[] };
+    const state = JSON.parse(fs.readFileSync(file, 'utf8')) as {
+      cookies?: { expires?: number }[];
+      origins?: unknown[];
+    };
     const cookies = state.cookies ?? [];
     if (!cookies.length) return (state.origins?.length ?? 0) > 0; // token-in-localStorage sessions
     return cookies.some((c) => c.expires === undefined || c.expires < 0 || c.expires * 1000 > now);
@@ -49,21 +60,41 @@ export function isStateFresh(file: string, opts: { now?: number; maxAgeMs?: numb
 function urlMatcher(pattern: string): (url: URL) => boolean {
   const m = /^\/(.+)\/([a-z]*)$/.exec(pattern);
   if (m) {
-    try { const re = new RegExp(m[1], m[2]); return (u) => re.test(u.pathname + u.search) || re.test(u.href); } catch { /* substring */ }
+    try {
+      const re = new RegExp(m[1], m[2]);
+      return (u) => re.test(u.pathname + u.search) || re.test(u.href);
+    } catch {
+      /* substring */
+    }
   }
   return (u) => (u.pathname + u.search).includes(pattern) || u.href.includes(pattern);
 }
 
-const passwordVisible = async (page: Page) => (await page.locator('input[type=password]:visible').count().catch(() => 0)) > 0;
-const textVisible = async (page: Page, text: string) => page.getByText(text, { exact: false }).first().isVisible().catch(() => false);
+const passwordVisible = async (page: Page) =>
+  (await page
+    .locator('input[type=password]:visible')
+    .count()
+    .catch(() => 0)) > 0;
+const textVisible = async (page: Page, text: string) =>
+  page
+    .getByText(text, { exact: false })
+    .first()
+    .isVisible()
+    .catch(() => false);
 
 /** Is the page in a logged-in state? Used after submitting the form (`login`) and to re-validate a stored session. */
-async function loggedIn(page: Page, hints: LoginHints, loginPath: string | undefined, mode: 'login' | 'check'): Promise<boolean> {
+async function loggedIn(
+  page: Page,
+  hints: LoginHints,
+  loginPath: string | undefined,
+  mode: 'login' | 'check',
+): Promise<boolean> {
   const u = new URL(page.url());
   if (hints.successUrl && !urlMatcher(hints.successUrl)(u) && mode === 'login') return false;
   if (hints.successText && !(await textVisible(page, hints.successText))) return false;
   if (await passwordVisible(page)) return false;
-  if (loginPath && u.pathname === loginPath && !(mode === 'login' && (hints.successUrl || hints.successText))) return false;
+  if (loginPath && u.pathname === loginPath && !(mode === 'login' && (hints.successUrl || hints.successText)))
+    return false;
   return true;
 }
 
@@ -83,26 +114,43 @@ async function findLoginPage(page: Page, origin: string, hints: LoginHints, time
   if (hints.loginUrl) candidates.push(resolveUrl(hints.loginUrl, origin));
   else {
     await page.goto(origin, { waitUntil: 'load', timeout: timeoutMs }).catch(() => {});
-    const links = await page.evaluate(`[...document.querySelectorAll('a[href]')].filter((a) => /\\b(log\\s?-?in|sign\\s?-?in)\\b/i.test(a.textContent || '')).map((a) => a.href)`).catch(() => []) as string[];
+    const links = (await page
+      .evaluate(
+        `[...document.querySelectorAll('a[href]')].filter((a) => /\\b(log\\s?-?in|sign\\s?-?in)\\b/i.test(a.textContent || '')).map((a) => a.href)`,
+      )
+      .catch(() => [])) as string[];
     candidates.push(...links.filter((l) => l.startsWith(origin)), ...COMMON_LOGIN_PATHS.map((p) => origin + p));
   }
   for (const c of [...new Set(candidates)]) {
     await page.goto(c, { waitUntil: 'load', timeout: timeoutMs }).catch(() => {});
     if (await passwordVisible(page)) return c;
   }
-  { const m = `Could not find a login form for ${origin}. Set "login.loginUrl" for this site in the credentials file.`; throw new CredentialsError(m, m); }
+  {
+    const m = `Could not find a login form for ${origin}. Set "login.loginUrl" for this site in the credentials file.`;
+    throw new CredentialsError(m, m);
+  }
 }
 
-interface Selectors { usernameSelector: string; passwordSelector: string; submitSelector: string }
+interface Selectors {
+  usernameSelector: string;
+  passwordSelector: string;
+  submitSelector: string;
+}
 
 async function locateForm(page: Page, hints: LoginHints, deps: AuthDeps): Promise<Selectors> {
-  if (hints.usernameSelector && hints.passwordSelector && hints.submitSelector) return { usernameSelector: hints.usernameSelector, passwordSelector: hints.passwordSelector, submitSelector: hints.submitSelector };
+  if (hints.usernameSelector && hints.passwordSelector && hints.submitSelector)
+    return {
+      usernameSelector: hints.usernameSelector,
+      passwordSelector: hints.passwordSelector,
+      submitSelector: hints.submitSelector,
+    };
   const { model } = await capture(page, page.url(), 0);
   // The model sees the page and *placeholders*; the real values are typed locally below.
   const found = await deps.getLLM().structured({
     name: 'locate_login_form',
     description: 'Return Playwright selectors for the login form fields.',
-    system: 'You locate the login form on a web page. Return Playwright-compatible selectors (CSS, or role=/text= selectors) for the username/e-mail field, the password field and the submit button. The credentials are {{username}} and {{password}}; you never need real values.',
+    system:
+      'You locate the login form on a web page. Return Playwright-compatible selectors (CSS, or role=/text= selectors) for the username/e-mail field, the password field and the submit button. The credentials are {{username}} and {{password}}; you never need real values.',
     prompt: `Login page:\n\n${pageToPrompt(model)}\n\nThe test will type {{username}} into the username field and {{password}} into the password field, then click submit.`,
     schema: loginFormSchema,
   });
@@ -113,9 +161,15 @@ async function locateForm(page: Page, hints: LoginHints, deps: AuthDeps): Promis
   };
 }
 
-async function launch(deps: AuthDeps, storageState?: string): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
+async function launch(
+  deps: AuthDeps,
+  storageState?: string,
+): Promise<{ browser: Browser; context: BrowserContext; page: Page }> {
   const browser = await chromium.launch({ headless: deps.config.headless });
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(storageState ? { storageState } : {}) });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    ...(storageState ? { storageState } : {}),
+  });
   return { browser, context, page: await context.newPage() };
 }
 
@@ -129,7 +183,12 @@ export async function isSessionValid(deps: AuthDeps, url: string, userName?: str
   if (!hints.checkUrl && !hints.successText) return true;
   const { browser, page } = await launch(deps, file);
   try {
-    await page.goto(resolveUrl(hints.checkUrl ?? meta.origin, meta.origin), { waitUntil: 'load', timeout: deps.config.timeoutMs }).catch(() => {});
+    await page
+      .goto(resolveUrl(hints.checkUrl ?? meta.origin, meta.origin), {
+        waitUntil: 'load',
+        timeout: deps.config.timeoutMs,
+      })
+      .catch(() => {});
     const loginPath = hints.loginUrl ? new URL(hints.loginUrl, meta.origin).pathname : undefined;
     return await loggedIn(page, hints, loginPath, 'check');
   } finally {
@@ -145,7 +204,13 @@ async function login(deps: AuthDeps, url: string, user: ResolvedUser, file: stri
     const loginUrl = await findLoginPage(page, meta.origin, hints, deps.config.timeoutMs);
     const sel = await locateForm(page, hints, deps);
     for (const s of Object.values(sel)) {
-      if ((await page.locator(s).count().catch(() => 0)) < 1) throw new Error(`login selector ${JSON.stringify(s)} matched nothing on ${new URL(loginUrl).pathname}`);
+      if (
+        (await page
+          .locator(s)
+          .count()
+          .catch(() => 0)) < 1
+      )
+        throw new Error(`login selector ${JSON.stringify(s)} matched nothing on ${new URL(loginUrl).pathname}`);
     }
     await page.locator(sel.usernameSelector).first().fill(user.username, { timeout: 10_000 });
     await page.locator(sel.passwordSelector).first().fill(user.password, { timeout: 10_000 });
@@ -164,7 +229,11 @@ async function login(deps: AuthDeps, url: string, user: ResolvedUser, file: stri
 }
 
 /** Log in (or reuse a still-valid stored session) and return the storageState path. Errors never contain credential values. */
-export async function ensureSession(deps: AuthDeps, url: string, opts: { user?: string; force?: boolean } = {}): Promise<Session> {
+export async function ensureSession(
+  deps: AuthDeps,
+  url: string,
+  opts: { user?: string; force?: boolean } = {},
+): Promise<Session> {
   const meta = normalizeSite(url);
   const user = deps.credentials.getUser(meta.id, opts.user ?? deps.config.authUser);
   const file = deps.store.authStatePath(meta.id, user.name);

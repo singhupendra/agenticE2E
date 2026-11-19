@@ -18,7 +18,8 @@ export interface CrawlOptions {
   storageState?: string;
 }
 
-const SKIP_EXT = /\.(pdf|zip|gz|tar|png|jpe?g|gif|svg|webp|ico|mp4|mp3|mov|avi|css|js|json|xml|txt|woff2?|ttf|dmg|exe)$/i;
+const SKIP_EXT =
+  /\.(pdf|zip|gz|tar|png|jpe?g|gif|svg|webp|ico|mp4|mp3|mov|avi|css|js|json|xml|txt|woff2?|ttf|dmg|exe)$/i;
 
 /**
  * Runs inside the page. Kept as a plain-JS string (not a function) so bundler helpers such as
@@ -83,7 +84,13 @@ const EXTRACT_SCRIPT = `(() => {
 })()`;
 
 interface Extracted {
-  title: string; elements: PageModel['elements']; forms: PageModel['forms']; navLinks: PageModel['navLinks']; headings: string[]; links: string[]; linkItems: { href: string; text: string }[];
+  title: string;
+  elements: PageModel['elements'];
+  forms: PageModel['forms'];
+  navLinks: PageModel['navLinks'];
+  headings: string[];
+  links: string[];
+  linkItems: { href: string; text: string }[];
 }
 
 function canonical(href: string, origin: string): string | null {
@@ -101,10 +108,24 @@ function canonical(href: string, origin: string): string | null {
 export async function capture(page: Page, url: string, depth: number): Promise<{ model: PageModel; links: string[] }> {
   const ex = (await page.evaluate(EXTRACT_SCRIPT)) as Extracted;
   let aria = '';
-  try { aria = (await page.locator('body').ariaSnapshot({ timeout: 5000 })).slice(0, 6000); } catch { /* best effort */ }
+  try {
+    aria = (await page.locator('body').ariaSnapshot({ timeout: 5000 })).slice(0, 6000);
+  } catch {
+    /* best effort */
+  }
   const u = new URL(page.url());
   return {
-    model: { url: url, path: u.pathname + u.search, title: ex.title, depth, headings: ex.headings, ariaSnapshot: aria, elements: ex.elements, forms: ex.forms, navLinks: ex.navLinks },
+    model: {
+      url: url,
+      path: u.pathname + u.search,
+      title: ex.title,
+      depth,
+      headings: ex.headings,
+      ariaSnapshot: aria,
+      elements: ex.elements,
+      forms: ex.forms,
+      navLinks: ex.navLinks,
+    },
     links: ex.linkItems.filter((l) => !isDestructiveLink(l.text, l.href)).map((l) => l.href),
   };
 }
@@ -115,7 +136,10 @@ export async function crawl(startUrl: string, opts: CrawlOptions): Promise<PageM
   const origin = start.origin;
   const deadline = Date.now() + opts.timeoutMs;
   const browser = opts.browser ?? (await chromium.launch({ headless: opts.headless }));
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ...(opts.storageState ? { storageState: opts.storageState } : {}) });
+  const context = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    ...(opts.storageState ? { storageState: opts.storageState } : {}),
+  });
   const pages: PageModel[] = [];
   const seen = new Set<string>([canonical(start.href, origin) ?? start.href]);
   const queue: { url: string; depth: number }[] = [{ url: start.href, depth: 0 }];
@@ -125,20 +149,34 @@ export async function crawl(startUrl: string, opts: CrawlOptions): Promise<PageM
     while (queue.length && pages.length < opts.maxPages && Date.now() < deadline) {
       const { url, depth } = queue.shift()!;
       try {
-        const resp = await page.goto(url, { waitUntil: 'load', timeout: Math.max(1000, Math.min(20_000, deadline - Date.now())) });
+        const resp = await page.goto(url, {
+          waitUntil: 'load',
+          timeout: Math.max(1000, Math.min(20_000, deadline - Date.now())),
+        });
         if (resp && resp.status() >= 400 && pages.length > 0) continue; // skip broken sub-pages
         const { model, links } = await capture(page, url, depth);
         if (opts.screenshotDir) {
           fs.mkdirSync(opts.screenshotDir, { recursive: true });
-          const f = path.join(opts.screenshotDir, `${String(pages.length + 1).padStart(2, '0')}-${(model.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'home').slice(0, 40)}.png`);
-          await page.screenshot({ path: f, fullPage: opts.fullPage ?? false }).then(() => { model.screenshot = f; }).catch(() => {});
+          const f = path.join(
+            opts.screenshotDir,
+            `${String(pages.length + 1).padStart(2, '0')}-${(model.path.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'home').slice(0, 40)}.png`,
+          );
+          await page
+            .screenshot({ path: f, fullPage: opts.fullPage ?? false })
+            .then(() => {
+              model.screenshot = f;
+            })
+            .catch(() => {});
         }
         pages.push(model);
         opts.onPage?.(model);
         if (depth < opts.maxDepth) {
           for (const l of links) {
             const c = canonical(l, origin);
-            if (c && !seen.has(c)) { seen.add(c); queue.push({ url: c, depth: depth + 1 }); }
+            if (c && !seen.has(c)) {
+              seen.add(c);
+              queue.push({ url: c, depth: depth + 1 });
+            }
           }
         }
       } catch (e) {
@@ -150,6 +188,7 @@ export async function crawl(startUrl: string, opts: CrawlOptions): Promise<PageM
     await context.close().catch(() => {});
     if (!opts.browser) await browser.close().catch(() => {});
   }
-  if (pages.length === 0) throw new Error(`Could not reach or load ${startUrl}: ${firstError?.message.split('\n')[0] ?? 'no pages loaded'}`);
+  if (pages.length === 0)
+    throw new Error(`Could not reach or load ${startUrl}: ${firstError?.message.split('\n')[0] ?? 'no pages loaded'}`);
   return pages;
 }

@@ -3,8 +3,12 @@ import { crawl } from '../src/core/discovery.js';
 import { startFixtureSite, type Fixture } from './helpers/fixture-site.js';
 
 let fx: Fixture;
-beforeAll(async () => { fx = await startFixtureSite(); });
-afterAll(async () => { await fx.close(); });
+beforeAll(async () => {
+  fx = await startFixtureSite();
+});
+afterAll(async () => {
+  await fx.close();
+});
 
 describe('discovery crawl', () => {
   it('AC-8: respects maxPages', async () => {
@@ -40,6 +44,8 @@ describe('discovery crawl', () => {
   });
 
   it('survives unreachable start url with a clear error', async () => {
-    await expect(crawl('http://127.0.0.1:1', { maxPages: 1, maxDepth: 0, timeoutMs: 5000, headless: true })).rejects.toThrow(/reach|load|navigate/i);
+    await expect(
+      crawl('http://127.0.0.1:1', { maxPages: 1, maxDepth: 0, timeoutMs: 5000, headless: true }),
+    ).rejects.toThrow(/reach|load|navigate/i);
   });
 });

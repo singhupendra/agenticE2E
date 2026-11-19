@@ -11,15 +11,27 @@ import { GOOD_SPEC, FAILING_SPEC } from './helpers/specs.js';
 let fx: Fixture;
 let store: Store;
 const SITE = 'fixture.test';
-beforeAll(async () => { fx = await startFixtureSite(); });
-afterAll(async () => { await fx.close(); });
+beforeAll(async () => {
+  fx = await startFixtureSite();
+});
+afterAll(async () => {
+  await fx.close();
+});
 beforeEach(() => {
   store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'run-')));
   store.saveTest(SITE, 'home-ok', GOOD_SPEC);
 });
 
 const run = (screenshots: ScreenshotMode, ids?: string[], fullPage = false) =>
-  runTests(store, { site: SITE, baseUrl: fx.url, screenshots, fullPage, headless: true, testTimeoutMs: 10_000, journeyIds: ids });
+  runTests(store, {
+    site: SITE,
+    baseUrl: fx.url,
+    screenshots,
+    fullPage,
+    headless: true,
+    testTimeoutMs: 10_000,
+    journeyIds: ids,
+  });
 const pngs = (r: Awaited<ReturnType<typeof run>>, id: string) => r.results.find((x) => x.journeyId === id)!.screenshots;
 
 describe('runner', () => {
@@ -41,7 +53,9 @@ describe('runner', () => {
     expect(store.loadRun(SITE, r.id)?.results).toHaveLength(2);
   });
 
-  it('AC-23: every-step', async () => { expect(pngs(await run('every-step'), 'home-ok').length).toBeGreaterThanOrEqual(2); });
+  it('AC-23: every-step', async () => {
+    expect(pngs(await run('every-step'), 'home-ok').length).toBeGreaterThanOrEqual(2);
+  });
   it('AC-23: off', async () => {
     store.saveTest(SITE, 'contact-broken', FAILING_SPEC);
     const r = await run('off');
@@ -49,7 +63,9 @@ describe('runner', () => {
     expect(pngs(r, 'contact-broken')).toEqual([]);
     expect(r.results.find((x) => x.journeyId === 'contact-broken')!.failure?.ariaSnapshot).toBeTruthy();
   });
-  it('AC-23: end-of-journey', async () => { expect(pngs(await run('end-of-journey'), 'home-ok')).toHaveLength(1); });
+  it('AC-23: end-of-journey', async () => {
+    expect(pngs(await run('end-of-journey'), 'home-ok')).toHaveLength(1);
+  });
   it('can run a subset by id', async () => {
     store.saveTest(SITE, 'contact-broken', FAILING_SPEC);
     const r = await run('off', ['home-ok']);
@@ -61,7 +77,16 @@ describe('runner', () => {
   });
   it('throws when there are no tests', async () => {
     const empty = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'run-')));
-    await expect(runTests(empty, { site: 'none.test', baseUrl: fx.url, screenshots: 'off', fullPage: false, headless: true, testTimeoutMs: 5000 })).rejects.toThrow(/no tests/i);
+    await expect(
+      runTests(empty, {
+        site: 'none.test',
+        baseUrl: fx.url,
+        screenshots: 'off',
+        fullPage: false,
+        headless: true,
+        testTimeoutMs: 5000,
+      }),
+    ).rejects.toThrow(/no tests/i);
   });
   it('marks specs with load errors as failed', async () => {
     store.saveTest(SITE, 'broken-syntax', "import { test } from './_support';\ntest('x', async () => { await ;");

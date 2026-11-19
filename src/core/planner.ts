@@ -4,7 +4,14 @@ import type { Journey, PageModel } from './types.js';
 import { withDefaultTags } from './scale/tags.js';
 
 export function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50).replace(/-+$/, '') || 'journey';
+  return (
+    s
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 50)
+      .replace(/-+$/, '') || 'journey'
+  );
 }
 
 /** Compact, token-conscious text rendering of a page model for prompts. */
@@ -13,9 +20,13 @@ export function pageToPrompt(p: PageModel, limits = { elements: 40, aria: 1500 }
   if (p.headings.length) lines.push(`headings: ${p.headings.join(' | ')}`);
   if (p.navLinks.length) lines.push(`nav: ${p.navLinks.map((l) => `${l.text}→${l.href}`).join(', ')}`);
   for (const f of p.forms) {
-    lines.push(`form${f.name ? ` "${f.name}"` : ''}: fields=[${f.fields.map((x) => `${x.role} "${x.label}"${x.type ? `:${x.type}` : ''}${x.testId ? ` #${x.testId}` : ''}`).join('; ')}] submit="${f.submit ?? ''}"`);
+    lines.push(
+      `form${f.name ? ` "${f.name}"` : ''}: fields=[${f.fields.map((x) => `${x.role} "${x.label}"${x.type ? `:${x.type}` : ''}${x.testId ? ` #${x.testId}` : ''}`).join('; ')}] submit="${f.submit ?? ''}"`,
+    );
   }
-  const els = p.elements.slice(0, limits.elements).map((e) => `${e.role} "${e.name}"${e.testId ? ` [testid=${e.testId}]` : ''}${e.href ? ` →${e.href}` : ''}`);
+  const els = p.elements
+    .slice(0, limits.elements)
+    .map((e) => `${e.role} "${e.name}"${e.testId ? ` [testid=${e.testId}]` : ''}${e.href ? ` →${e.href}` : ''}`);
   if (els.length) lines.push(`interactive: ${els.join('; ')}`);
   if (p.ariaSnapshot) lines.push(`aria:\n${p.ariaSnapshot.slice(0, limits.aria)}`);
   return lines.join('\n');
@@ -36,25 +47,45 @@ const TAGS_RULE = `
 
 Tags: give every journey suite tags from "smoke" (fast core sanity check), "regression" (full suite) and "critical" (business-critical flow), and add "destructive" when the journey creates, changes or deletes data, submits orders or payments, or logs out.`;
 
-export interface ProposeOptions { auth?: { user: string; userNames: string[] } }
+export interface ProposeOptions {
+  auth?: { user: string; userNames: string[] };
+}
 
 const PROPOSE_SYSTEM_AUTH = `You are a senior QA engineer designing end-to-end user journeys for a website, from compact models of its pages.
 Propose realistic, automatable journeys (e.g. search, navigation, account management, orders, settings).
 Rules: only use pages/elements that appear in the models; each journey has a short name, a one-sentence goal, a priority, and 2-8 ordered concrete steps that name the visible labels/buttons involved and the expected observable outcome of the last step.`;
 
-export async function proposeJourneys(llm: LLMProvider, pages: PageModel[], opts: ProposeOptions = {}): Promise<Journey[]> {
+export async function proposeJourneys(
+  llm: LLMProvider,
+  pages: PageModel[],
+  opts: ProposeOptions = {},
+): Promise<Journey[]> {
   if (!pages.length) throw new Error('No pages to plan from');
   const auth = opts.auth;
   const system = (auth ? PROPOSE_SYSTEM_AUTH + AUTH_ADDENDUM(auth.user, auth.userNames) : PROPOSE_SYSTEM) + TAGS_RULE;
   const prompt = `Site pages (${pages.length}):\n\n${pages.map((p) => pageToPrompt(p)).join('\n\n')}\n\nPropose candidate user journeys.`;
-  const out = await llm.structured({ name: 'propose_journeys', description: 'Propose candidate user journeys for the site.', system, prompt, schema: journeyProposalSchema });
+  const out = await llm.structured({
+    name: 'propose_journeys',
+    description: 'Propose candidate user journeys for the site.',
+    system,
+    prompt,
+    schema: journeyProposalSchema,
+  });
   const used = new Set<string>();
   return out.journeys.map((j) => {
     const base = slugify(j.name);
     let id = base;
     for (let i = 2; used.has(id); i++) id = `${base}-${i}`;
     used.add(id);
-    const journey: Journey = { id, name: j.name, goal: j.goal, priority: j.priority, tags: withDefaultTags(j.priority, j.tags), steps: j.steps, status: 'proposed' };
+    const journey: Journey = {
+      id,
+      name: j.name,
+      goal: j.goal,
+      priority: j.priority,
+      tags: withDefaultTags(j.priority, j.tags),
+      steps: j.steps,
+      status: 'proposed',
+    };
     if (auth && j.requiresAuth) {
       journey.requiresAuth = true;
       journey.user = j.user && auth.userNames.includes(j.user) ? j.user : auth.user;
@@ -66,7 +97,12 @@ export async function proposeJourneys(llm: LLMProvider, pages: PageModel[], opts
 function matcher(pattern: string): (text: string) => boolean {
   const m = /^\/(.+)\/([a-z]*)$/.exec(pattern);
   if (m) {
-    try { const re = new RegExp(m[1], m[2]); return (t) => re.test(t); } catch { /* fall through to substring */ }
+    try {
+      const re = new RegExp(m[1], m[2]);
+      return (t) => re.test(t);
+    } catch {
+      /* fall through to substring */
+    }
   }
   const needle = pattern.toLowerCase();
   return (t) => t.toLowerCase().includes(needle);
@@ -74,7 +110,8 @@ function matcher(pattern: string): (text: string) => boolean {
 const haystack = (j: Journey) => `${j.name} ${j.goal} ${j.tags.join(' ')}`;
 
 export function applyFilters(journeys: Journey[], include: string[], exclude: string[]): Journey[] {
-  const inc = include.map(matcher), exc = exclude.map(matcher);
+  const inc = include.map(matcher),
+    exc = exclude.map(matcher);
   return journeys.filter((j) => {
     const h = haystack(j);
     if (exc.some((f) => f(h))) return false;
@@ -84,7 +121,11 @@ export function applyFilters(journeys: Journey[], include: string[], exclude: st
 
 const PRIORITY_ORDER = { high: 0, medium: 1, low: 2 } as const;
 
-export interface SelectOptions { maxJourneys: number; include: string[]; exclude: string[] }
+export interface SelectOptions {
+  maxJourneys: number;
+  include: string[];
+  exclude: string[];
+}
 
 /**
  * LLM ranks eligible journeys; we then deterministically apply filters + the max count.
@@ -101,19 +142,39 @@ export async function selectJourneys(llm: LLMProvider, journeys: Journey[], opts
     const prompt = `Rank these candidate journeys by value for an automated regression suite (core business flows and high-traffic features first; cheap, stable, deterministic first). Return ids in order of preference — best first. You may omit journeys that are not worth automating.\n\n${eligible
       .map((j) => `- id=${j.id} [${j.priority}] ${j.name}: ${j.goal}\n    steps: ${j.steps.join(' → ')}`)
       .join('\n')}`;
-    const out = await llm.structured({ name: 'rank_journeys', description: 'Rank journeys to automate.', system: 'You are a test strategist.', prompt, schema: journeyRankingSchema });
+    const out = await llm.structured({
+      name: 'rank_journeys',
+      description: 'Rank journeys to automate.',
+      system: 'You are a test strategist.',
+      prompt,
+      schema: journeyRankingSchema,
+    });
     const ids = new Set(eligible.map((j) => j.id));
-    for (const r of out.ranked) if (ids.has(r.id) && !rank.has(r.id)) rank.set(r.id, { rank: rank.size + 1, rationale: r.rationale });
+    for (const r of out.ranked)
+      if (ids.has(r.id) && !rank.has(r.id)) rank.set(r.id, { rank: rank.size + 1, rationale: r.rationale });
     if (!rank.size) {
-      [...eligible].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]).forEach((j, i) => rank.set(j.id, { rank: i + 1, rationale: 'fallback: priority order' }));
+      [...eligible]
+        .sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])
+        .forEach((j, i) => rank.set(j.id, { rank: i + 1, rationale: 'fallback: priority order' }));
     }
   }
-  const chosen = new Set([...rank.entries()].sort((a, b) => a[1].rank - b[1].rank).slice(0, slots).map(([id]) => id));
+  const chosen = new Set(
+    [...rank.entries()]
+      .sort((a, b) => a[1].rank - b[1].rank)
+      .slice(0, slots)
+      .map(([id]) => id),
+  );
   return journeys.map((j) => {
     if (j.status === 'approved' || j.status === 'rejected') return j;
     const r = rank.get(j.id);
     const next: Journey = { ...j, status: chosen.has(j.id) ? 'selected' : 'proposed' };
-    if (r) { next.rank = r.rank; next.rationale = r.rationale; } else { delete next.rank; delete next.rationale; }
+    if (r) {
+      next.rank = r.rank;
+      next.rationale = r.rationale;
+    } else {
+      delete next.rank;
+      delete next.rationale;
+    }
     return next;
   });
 }

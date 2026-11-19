@@ -1,7 +1,13 @@
 import { Command } from 'commander';
 import { loadConfig, type Config, type PartialConfig } from '../core/config.js';
 import { EXIT_CODES, runCi } from '../core/ci/run-ci.js';
-import { buildSiteReport, parseReporterList, publishError, publishReport, type ReportMode } from '../core/reporting/index.js';
+import {
+  buildSiteReport,
+  parseReporterList,
+  publishError,
+  publishReport,
+  type ReportMode,
+} from '../core/reporting/index.js';
 import type { Context } from '../core/pipeline.js';
 import type { HealRecord, ProgressEvent, RunRecord } from '../core/types.js';
 
@@ -10,7 +16,10 @@ export function addReportOptions(cmd: Command): Command {
   return cmd
     .option('--reporter <list>', 'report formats, comma-separated: junit,json,html (default: all) or none')
     .option('--report-dir <dir>', 'also write the reports (with screenshots) to this directory')
-    .option('--notify-on <when>', 'webhook/Slack notifications: always | failure | never (URLs from AGENTIC_E2E_WEBHOOK_URL / AGENTIC_E2E_SLACK_WEBHOOK_URL)');
+    .option(
+      '--notify-on <when>',
+      'webhook/Slack notifications: always | failure | never (URLs from AGENTIC_E2E_WEBHOOK_URL / AGENTIC_E2E_SLACK_WEBHOOK_URL)',
+    );
 }
 export function reportCliConfig(o: Record<string, unknown>): PartialConfig {
   return {
@@ -21,11 +30,14 @@ export function reportCliConfig(o: Record<string, unknown>): PartialConfig {
 }
 
 /** Reports + step summary + notifications after `run` / `heal` / `all`. */
-export async function reportRun(ctx: Context, url: string, o: { mode: ReportMode; runs: RunRecord[]; heals?: HealRecord[]; exitCode: number }) {
+export async function reportRun(
+  ctx: Context,
+  url: string,
+  o: { mode: ReportMode; runs: RunRecord[]; heals?: HealRecord[]; exitCode: number },
+) {
   if (!o.runs.length) return;
   await publishReport(ctx, buildSiteReport(ctx, url, o), { exitCode: o.exitCode });
 }
-
 
 /** `ci` errors raised by commander itself (unknown flag, bad value) are config errors (exit 2). */
 export function commanderExitCode(argv: string[], err: { code?: string; exitCode?: number }): number {
@@ -34,14 +46,24 @@ export function commanderExitCode(argv: string[], err: { code?: string; exitCode
   return err.exitCode ?? 1;
 }
 
-export function registerCiCommand(program: Command, h: {
-  addCommon: (c: Command) => Command;
-  cliConfig: (o: Record<string, unknown>) => PartialConfig;
-  logEvent: (e: ProgressEvent) => void;
-  setExit: (code: number) => void;
-}) {
-  addReportOptions(h.addCommon(program.command('ci <url>')
-    .description('non-interactive CI run of stored tests; exit 0 pass, 1 test failures, 2 config/auth error, 3 LLM/infra error')))
+export function registerCiCommand(
+  program: Command,
+  h: {
+    addCommon: (c: Command) => Command;
+    cliConfig: (o: Record<string, unknown>) => PartialConfig;
+    logEvent: (e: ProgressEvent) => void;
+    setExit: (code: number) => void;
+  },
+) {
+  addReportOptions(
+    h.addCommon(
+      program
+        .command('ci <url>')
+        .description(
+          'non-interactive CI run of stored tests; exit 0 pass, 1 test failures, 2 config/auth error, 3 LLM/infra error',
+        ),
+    ),
+  )
     .option('--allow-heal', 'heal tests that still fail (calls the LLM and may rewrite specs); off by default in CI')
     .action(async (url: string, o) => {
       let config: Config;
@@ -55,7 +77,8 @@ export function registerCiCommand(program: Command, h: {
       let r: Awaited<ReturnType<typeof runCi>>;
       try {
         r = await runCi({ config, url, allowHeal: !!o.allowHeal, onProgress: h.logEvent });
-      } catch (e) { // fallback: runCi is total, but an uncaught error must never look like "test failures"
+      } catch (e) {
+        // fallback: runCi is total, but an uncaught error must never look like "test failures"
         console.error(`Error: ${(e as Error)?.message ?? String(e)}`);
         await publishError({ exitCode: EXIT_CODES.LLM_OR_INFRA, error: e, notifyOn: config.notifyOn }).catch(() => {});
         return h.setExit(EXIT_CODES.LLM_OR_INFRA);
@@ -63,9 +86,14 @@ export function registerCiCommand(program: Command, h: {
       if (r.error) console.error(`Error: ${r.error}`);
       if (r.report) {
         console.log('\nCI result:');
-        for (const t of r.report.tests) console.log(`  ${t.outcome === 'passed' || t.outcome === 'healed' ? '✔' : t.outcome === 'skipped' ? '-' : '✗'} ${t.journeyId} ${t.outcome}${t.flaky ? ` (flaky: ${t.flaky.reasons.join(', ')})` : ''}${t.attempts > 1 ? ` [${t.attempts} attempts]` : ''}`);
+        for (const t of r.report.tests)
+          console.log(
+            `  ${t.outcome === 'passed' || t.outcome === 'healed' ? '✔' : t.outcome === 'skipped' ? '-' : '✗'} ${t.journeyId} ${t.outcome}${t.flaky ? ` (flaky: ${t.flaky.reasons.join(', ')})` : ''}${t.attempts > 1 ? ` [${t.attempts} attempts]` : ''}`,
+          );
         const x = r.report.totals;
-        console.log(`${x.tests} test(s): ${x.passed} passed, ${x.failed} failed, ${x.healed} healed, ${x.skipped} skipped, ${x.flaky} flaky`);
+        console.log(
+          `${x.tests} test(s): ${x.passed} passed, ${x.failed} failed, ${x.healed} healed, ${x.skipped} skipped, ${x.flaky} flaky`,
+        );
       }
       const meaning = ['pass', 'test failures', 'config/auth error', 'LLM/infra error'][r.exitCode];
       console.log(`exit code ${r.exitCode} (${meaning})`);

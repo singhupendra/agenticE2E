@@ -9,7 +9,10 @@ import { writeCreds } from './helpers/credentials.js';
 
 const DOC = {
   'shop.example.com': {
-    users: { alice: { username: 'alice@x.test', password: 'pw-alice-123', otp: '999111' }, bob: { username: 'bob@x.test', password: 'pw-bob-456' } },
+    users: {
+      alice: { username: 'alice@x.test', password: 'pw-alice-123', otp: '999111' },
+      bob: { username: 'bob@x.test', password: 'pw-bob-456' },
+    },
     login: { loginUrl: '/signin', successText: 'Dashboard' },
   },
   'http://localhost:3000': { users: { solo: { username: 'u', password: 'only-pass' } }, defaultUser: 'solo' },
@@ -22,7 +25,12 @@ describe('credentials loading (SPEC-009)', () => {
     expect(c.userNames('shop.example.com')).toEqual(['alice', 'bob']);
     expect(c.hasSite('shop.example.com')).toBe(true);
     const u = c.getUser('shop.example.com', 'alice');
-    expect(u).toMatchObject({ name: 'alice', username: 'alice@x.test', password: 'pw-alice-123', fields: { otp: '999111' } });
+    expect(u).toMatchObject({
+      name: 'alice',
+      username: 'alice@x.test',
+      password: 'pw-alice-123',
+      fields: { otp: '999111' },
+    });
     expect(c.loginHints('shop.example.com')).toMatchObject({ loginUrl: '/signin', successText: 'Dashboard' });
   });
 
@@ -30,7 +38,12 @@ describe('credentials loading (SPEC-009)', () => {
     const c = loadCredentials({ file: writeCreds(DOC), explicit: true });
     expect(c.hasSite('localhost_3000')).toBe(true);
     expect(c.userNames('localhost_3000')).toEqual(['solo']);
-    expect(loadCredentials({ file: writeCreds({ 'HTTPS://Shop.Example.COM/': { users: { a: { username: 'u1', password: 'p1pp' } } } }), explicit: true }).hasSite('shop.example.com')).toBe(true);
+    expect(
+      loadCredentials({
+        file: writeCreds({ 'HTTPS://Shop.Example.COM/': { users: { a: { username: 'u1', password: 'p1pp' } } } }),
+        explicit: true,
+      }).hasSite('shop.example.com'),
+    ).toBe(true);
   });
 
   it('AC-2: ${ENV_VAR} interpolation from env; unset var errors naming the variable only', () => {
@@ -38,7 +51,11 @@ describe('credentials loading (SPEC-009)', () => {
     const c = loadCredentials({ file, explicit: true, env: { E2E_T_USER: 'env-user', E2E_T_PW: 'env-secret-pw' } });
     expect(c.getUser('a.test', 'u')).toMatchObject({ username: 'env-user', password: 'env-secret-pw' });
     let msg = '';
-    try { loadCredentials({ file, explicit: true, env: { E2E_T_USER: 'env-user' } }); } catch (e) { msg = (e as Error).message; }
+    try {
+      loadCredentials({ file, explicit: true, env: { E2E_T_USER: 'env-user' } });
+    } catch (e) {
+      msg = (e as Error).message;
+    }
     expect(msg).toContain('E2E_T_PW');
     expect(msg).not.toContain('env-user');
   });
@@ -50,14 +67,28 @@ describe('credentials loading (SPEC-009)', () => {
     expect(() => c.getUser('shop.example.com')).toThrow(/several users.*alice, bob.*--user/i);
     expect(c.getUser('localhost_3000').name).toBe('solo'); // defaultUser / only user
     for (const call of [() => c.getUser('shop.example.com', 'carol'), () => c.getUser('shop.example.com')]) {
-      try { call(); } catch (e) { expect((e as Error).message).not.toMatch(/pw-alice|pw-bob|alice@x/); }
+      try {
+        call();
+      } catch (e) {
+        expect((e as Error).message).not.toMatch(/pw-alice|pw-bob|alice@x/);
+      }
     }
   });
 
   it('rejects malformed files without echoing values', () => {
-    expect(() => loadCredentials({ file: writeCreds('{ not json pw-secret-zzz'), explicit: true })).toThrow(CredentialsError);
-    try { loadCredentials({ file: writeCreds({ 'a.test': { users: { u: { username: 'x' } } } }), explicit: true }); } catch (e) { expect((e as Error).message).toMatch(/password/); }
-    try { loadCredentials({ file: writeCreds('{ not json pw-secret-zzz'), explicit: true }); } catch (e) { expect((e as Error).message).not.toContain('pw-secret-zzz'); }
+    expect(() => loadCredentials({ file: writeCreds('{ not json pw-secret-zzz'), explicit: true })).toThrow(
+      CredentialsError,
+    );
+    try {
+      loadCredentials({ file: writeCreds({ 'a.test': { users: { u: { username: 'x' } } } }), explicit: true });
+    } catch (e) {
+      expect((e as Error).message).toMatch(/password/);
+    }
+    try {
+      loadCredentials({ file: writeCreds('{ not json pw-secret-zzz'), explicit: true });
+    } catch (e) {
+      expect((e as Error).message).not.toContain('pw-secret-zzz');
+    }
   });
 
   it('AC-4: refuses a credentials file tracked by git; allows untracked and outside-repo files', () => {
@@ -66,7 +97,11 @@ describe('credentials loading (SPEC-009)', () => {
     const tracked = writeCreds(DOC, { dir: repo });
     execFileSync('git', ['add', 'credentials.json'], { cwd: repo });
     let err: unknown;
-    try { loadCredentials({ file: tracked, explicit: true }); } catch (e) { err = e; }
+    try {
+      loadCredentials({ file: tracked, explicit: true });
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(CredentialsError);
     expect((err as Error).message).toMatch(/tracked by git/);
     expect((err as Error).message).toContain('git rm --cached');
@@ -97,20 +132,35 @@ describe('credentials loading (SPEC-009)', () => {
     const cwd = '/work';
     expect(resolveConfig({ cwd }).credentialsFile).toBeUndefined();
     expect(resolveConfig({ cwd, file: { credentialsFile: 'f.json' } }).credentialsFile).toBe('/work/f.json');
-    expect(resolveConfig({ cwd, file: { credentialsFile: 'f.json' }, env: { AGENTIC_E2E_CREDENTIALS: 'e.json' } }).credentialsFile).toBe('/work/e.json');
-    expect(resolveConfig({ cwd, file: { credentialsFile: 'f.json' }, env: { AGENTIC_E2E_CREDENTIALS: 'e.json' }, cli: { credentialsFile: 'c.json' } }).credentialsFile).toBe('/work/c.json');
+    expect(
+      resolveConfig({ cwd, file: { credentialsFile: 'f.json' }, env: { AGENTIC_E2E_CREDENTIALS: 'e.json' } })
+        .credentialsFile,
+    ).toBe('/work/e.json');
+    expect(
+      resolveConfig({
+        cwd,
+        file: { credentialsFile: 'f.json' },
+        env: { AGENTIC_E2E_CREDENTIALS: 'e.json' },
+        cli: { credentialsFile: 'c.json' },
+      }).credentialsFile,
+    ).toBe('/work/c.json');
     expect(resolveConfig({ cwd }).auth).toBe(false);
-    expect(resolveConfig({ cwd, cli: { auth: true, authUser: 'alice' } })).toMatchObject({ auth: true, authUser: 'alice' });
+    expect(resolveConfig({ cwd, cli: { auth: true, authUser: 'alice' } })).toMatchObject({
+      auth: true,
+      authUser: 'alice',
+    });
   });
 
   it('exposes every secret value (all sites, all fields) with placeholders for the redactor', () => {
     const c = loadCredentials({ file: writeCreds(DOC), explicit: true });
     const vals = c.secretEntries();
-    expect(vals).toEqual(expect.arrayContaining([
-      { value: 'pw-alice-123', placeholder: '{{password}}' },
-      { value: 'alice@x.test', placeholder: '{{username}}' },
-      { value: '999111', placeholder: '{{otp}}' },
-      { value: 'only-pass', placeholder: '{{password}}' },
-    ]));
+    expect(vals).toEqual(
+      expect.arrayContaining([
+        { value: 'pw-alice-123', placeholder: '{{password}}' },
+        { value: 'alice@x.test', placeholder: '{{username}}' },
+        { value: '999111', placeholder: '{{otp}}' },
+        { value: 'only-pass', placeholder: '{{password}}' },
+      ]),
+    );
   });
 });

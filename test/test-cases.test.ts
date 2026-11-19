@@ -7,29 +7,72 @@ import { Store } from '../src/core/storage.js';
 import { listTestCases } from '../src/core/test-cases.js';
 import type { HealRecord, Journey, RunRecord, TestResult } from '../src/core/types.js';
 
-const j = (id: string, status: Journey['status'] = 'selected'): Journey => ({ id, name: `Journey ${id}`, goal: 'g', priority: 'high', tags: [], steps: ['a'], status });
-const res = (journeyId: string, status: TestResult['status'], error?: string): TestResult => ({ journeyId, file: `tests/${journeyId}.spec.ts`, status, durationMs: 120, error, screenshots: [] });
-const runRec = (id: string, finishedAt: string, results: TestResult[], kind: RunRecord['kind'] = 'run'): RunRecord =>
-  ({ id, kind, startedAt: finishedAt, finishedAt, screenshots: 'off', fullPage: false, results });
-const heal = (journeyId: string, outcome: HealRecord['outcome'], at: string): HealRecord =>
-  ({ id: `h-${journeyId}-${at}`, journeyId, at, outcome, reason: 'r', originalError: 'e', attempts: [] });
+const j = (id: string, status: Journey['status'] = 'selected'): Journey => ({
+  id,
+  name: `Journey ${id}`,
+  goal: 'g',
+  priority: 'high',
+  tags: [],
+  steps: ['a'],
+  status,
+});
+const res = (journeyId: string, status: TestResult['status'], error?: string): TestResult => ({
+  journeyId,
+  file: `tests/${journeyId}.spec.ts`,
+  status,
+  durationMs: 120,
+  error,
+  screenshots: [],
+});
+const runRec = (id: string, finishedAt: string, results: TestResult[], kind: RunRecord['kind'] = 'run'): RunRecord => ({
+  id,
+  kind,
+  startedAt: finishedAt,
+  finishedAt,
+  screenshots: 'off',
+  fullPage: false,
+  results,
+});
+const heal = (journeyId: string, outcome: HealRecord['outcome'], at: string): HealRecord => ({
+  id: `h-${journeyId}-${at}`,
+  journeyId,
+  at,
+  outcome,
+  reason: 'r',
+  originalError: 'e',
+  attempts: [],
+});
 
 let dir: string, store: Store, out: string[], err: string[];
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tc-'));
   store = new Store(dir);
-  out = []; err = [];
-  vi.spyOn(console, 'log').mockImplementation((...a) => { out.push(a.join(' ')); });
-  vi.spyOn(console, 'error').mockImplementation((...a) => { err.push(a.join(' ')); });
+  out = [];
+  err = [];
+  vi.spyOn(console, 'log').mockImplementation((...a) => {
+    out.push(a.join(' '));
+  });
+  vi.spyOn(console, 'error').mockImplementation((...a) => {
+    err.push(a.join(' '));
+  });
 });
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 const cli = (...args: string[]) => main(['node', 'agentic-e2e', ...args, '--data-dir', dir]);
 
 function seedSite() {
   store.saveSite({ id: 'example.com', origin: 'https://example.com', url: 'https://example.com' });
   store.saveJourneys('example.com', [j('a', 'selected'), j('b', 'approved'), j('c', 'proposed')]);
   for (const id of ['a', 'b', 'c']) store.saveTest('example.com', id, `// ${id}\n`);
-  store.saveRun('example.com', runRec('2026-01-01T00-00-00-000Z', '2026-01-01T00:00:05.000Z', [res('a', 'failed', 'boom\nstack'), res('b', 'failed', 'bad\nmore')]));
+  store.saveRun(
+    'example.com',
+    runRec('2026-01-01T00-00-00-000Z', '2026-01-01T00:00:05.000Z', [
+      res('a', 'failed', 'boom\nstack'),
+      res('b', 'failed', 'bad\nmore'),
+    ]),
+  );
   store.saveRun('example.com', runRec('2026-01-02T00-00-00-000Z', '2026-01-02T00:00:05.000Z', [res('a', 'passed')]));
 }
 
@@ -41,8 +84,17 @@ describe('listTestCases (core)', () => {
     expect(r.site).toEqual({ id: 'example.com', origin: 'https://example.com', url: 'https://example.com' });
     expect(r.tests.map((t) => t.journeyId)).toEqual(['a', 'b', 'c', 'orphan']);
     const [a, b, c, o] = r.tests;
-    expect(a).toMatchObject({ name: 'Journey a', journeyStatus: 'selected', specFile: path.resolve(dir, 'sites/example.com/tests/a.spec.ts') });
-    expect(a.lastRun).toMatchObject({ outcome: 'passed', runId: '2026-01-02T00-00-00-000Z', at: '2026-01-02T00:00:05.000Z', durationMs: 120 });
+    expect(a).toMatchObject({
+      name: 'Journey a',
+      journeyStatus: 'selected',
+      specFile: path.resolve(dir, 'sites/example.com/tests/a.spec.ts'),
+    });
+    expect(a.lastRun).toMatchObject({
+      outcome: 'passed',
+      runId: '2026-01-02T00-00-00-000Z',
+      at: '2026-01-02T00:00:05.000Z',
+      durationMs: 120,
+    });
     expect(b.journeyStatus).toBe('approved');
     expect(b.lastRun).toMatchObject({ outcome: 'failed', error: 'bad' });
     expect(c.lastRun).toEqual({ outcome: 'never_run' });
@@ -58,23 +110,47 @@ describe('listTestCases (core)', () => {
   });
   it('AC-4: timedOut counts as failed, skipped stays skipped', () => {
     seedSite();
-    store.saveRun('example.com', runRec('2026-01-03T00-00-00-000Z', '2026-01-03T00:00:05.000Z', [res('b', 'timedOut', 'slow'), res('c', 'skipped')]));
-    const t = Object.fromEntries(listTestCases(store, 'example.com')!.tests.map((x) => [x.journeyId, x.lastRun.outcome]));
+    store.saveRun(
+      'example.com',
+      runRec('2026-01-03T00-00-00-000Z', '2026-01-03T00:00:05.000Z', [
+        res('b', 'timedOut', 'slow'),
+        res('c', 'skipped'),
+      ]),
+    );
+    const t = Object.fromEntries(
+      listTestCases(store, 'example.com')!.tests.map((x) => [x.journeyId, x.lastRun.outcome]),
+    );
     expect(t).toMatchObject({ b: 'failed', c: 'skipped' });
   });
   it('AC-3: healed only for a passing heal-rerun with a healed record', () => {
     seedSite();
-    store.saveRun('example.com', runRec('2026-01-03T00-00-00-000Z', '2026-01-03T00:00:05.000Z', [res('b', 'passed'), res('c', 'passed')], 'heal-rerun'));
+    store.saveRun(
+      'example.com',
+      runRec(
+        '2026-01-03T00-00-00-000Z',
+        '2026-01-03T00:00:05.000Z',
+        [res('b', 'passed'), res('c', 'passed')],
+        'heal-rerun',
+      ),
+    );
     store.appendHeal('example.com', heal('b', 'healed', '2026-01-03T00:00:06.000Z'));
     store.appendHeal('example.com', heal('c', 'flaky_or_environment', '2026-01-03T00:00:06.000Z'));
-    const t = Object.fromEntries(listTestCases(store, 'example.com')!.tests.map((x) => [x.journeyId, x.lastRun.outcome]));
+    const t = Object.fromEntries(
+      listTestCases(store, 'example.com')!.tests.map((x) => [x.journeyId, x.lastRun.outcome]),
+    );
     expect(t).toMatchObject({ b: 'healed', c: 'passed' });
   });
   it('a later plain run supersedes an earlier heal', () => {
     seedSite();
-    store.saveRun('example.com', runRec('2026-01-03T00-00-00-000Z', '2026-01-03T00:00:05.000Z', [res('b', 'passed')], 'heal-rerun'));
+    store.saveRun(
+      'example.com',
+      runRec('2026-01-03T00-00-00-000Z', '2026-01-03T00:00:05.000Z', [res('b', 'passed')], 'heal-rerun'),
+    );
     store.appendHeal('example.com', heal('b', 'healed', '2026-01-03T00:00:06.000Z'));
-    store.saveRun('example.com', runRec('2026-01-04T00-00-00-000Z', '2026-01-04T00:00:05.000Z', [res('b', 'failed', 'again')]));
+    store.saveRun(
+      'example.com',
+      runRec('2026-01-04T00-00-00-000Z', '2026-01-04T00:00:05.000Z', [res('b', 'failed', 'again')]),
+    );
     expect(listTestCases(store, 'example.com')!.tests.find((x) => x.journeyId === 'b')!.lastRun.outcome).toBe('failed');
   });
   it('AC-5: known site without tests gives an empty list', () => {
@@ -114,7 +190,8 @@ describe('cli list-test-cases', () => {
   });
   it('AC-6: unknown site exits 1 with a clear message and empty stdout', async () => {
     for (const extra of [[], ['--json']]) {
-      out.length = 0; err.length = 0;
+      out.length = 0;
+      err.length = 0;
       expect(await cli('list-test-cases', 'https://nowhere.test', ...extra)).toBe(1);
       expect(err.join('\n')).toMatch(/Unknown site nowhere\.test/);
       expect(err.join('\n')).toContain(dir);

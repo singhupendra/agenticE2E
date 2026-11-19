@@ -3,30 +3,129 @@ import type { HealRecord, Journey, ProgressEvent, ScreenshotMode } from '../../s
 import { notifyUnauthorized } from './session';
 
 export interface Settings {
-  screenshots: ScreenshotMode; fullPage: boolean; maxJourneys: number; maxPages: number; maxDepth: number;
-  healAttempts: number; provider: ProviderId; model: string; awsProfile?: string | null; requireApproval: boolean; include: string[]; exclude: string[]; headless: boolean;
+  screenshots: ScreenshotMode;
+  fullPage: boolean;
+  maxJourneys: number;
+  maxPages: number;
+  maxDepth: number;
+  healAttempts: number;
+  provider: ProviderId;
+  model: string;
+  awsProfile?: string | null;
+  requireApproval: boolean;
+  include: string[];
+  exclude: string[];
+  headless: boolean;
   /** SPEC-009: logged-in testing; `authUser` is a user *name* from the server's credentials file (omitted = default user). */
-  auth: boolean; authUser?: string;
+  auth: boolean;
+  authUser?: string;
 }
 /** SPEC-009: names only; the server never sends usernames, passwords or paths. */
-export interface AuthInfo { configured: boolean; users: string[]; error?: string }
-export interface SiteSummary { id: string; origin: string; url: string; journeys: number; tests: number; runs: number; lastRun: { id: string; passed: number; total: number } | null }
-export interface RunSummary { id: string; kind: string; startedAt: string; screenshots: string; results: { journeyId: string; status: string }[] }
+export interface AuthInfo {
+  configured: boolean;
+  users: string[];
+  error?: string;
+}
+export interface SiteSummary {
+  id: string;
+  origin: string;
+  url: string;
+  journeys: number;
+  tests: number;
+  runs: number;
+  lastRun: { id: string; passed: number; total: number } | null;
+}
+export interface RunSummary {
+  id: string;
+  kind: string;
+  startedAt: string;
+  screenshots: string;
+  results: { journeyId: string; status: string }[];
+}
 export interface SiteDetail {
-  meta: SiteSummary; journeys: Journey[]; pages: { path: string; title: string; depth: number; screenshot?: string }[];
-  tests: { id: string; versions: string[] }[]; runs: RunSummary[]; heals: HealRecord[];
+  meta: SiteSummary;
+  journeys: Journey[];
+  pages: { path: string; title: string; depth: number; screenshot?: string }[];
+  tests: { id: string; versions: string[] }[];
+  runs: RunSummary[];
+  heals: HealRecord[];
 }
 export type LastRunOutcome = 'passed' | 'failed' | 'skipped' | 'healed' | 'never_run';
-export interface TestCaseRow { journeyId: string; name: string; journeyStatus: string; requiresAuth?: boolean; user?: string; tags?: string[]; lastRun: { outcome: LastRunOutcome; at?: string; error?: string } }
-export interface HealJobPayload { journeyIds?: string[]; failedOnly?: boolean }
-export interface TestDetail { id: string; code: string; versions: { name: string; code: string }[] }
-export interface RunDetail { id: string; results: { journeyId: string; status: string; durationMs: number; error?: string; screenshots: string[]; tracePath?: string; failure?: { url: string; screenshot?: string } }[] }
+export interface TestCaseRow {
+  journeyId: string;
+  name: string;
+  journeyStatus: string;
+  requiresAuth?: boolean;
+  user?: string;
+  tags?: string[];
+  lastRun: { outcome: LastRunOutcome; at?: string; error?: string };
+}
+export interface HealJobPayload {
+  journeyIds?: string[];
+  failedOnly?: boolean;
+}
+export interface TestDetail {
+  id: string;
+  code: string;
+  versions: { name: string; code: string }[];
+}
+export interface RunDetail {
+  id: string;
+  results: {
+    journeyId: string;
+    status: string;
+    durationMs: number;
+    error?: string;
+    screenshots: string[];
+    tracePath?: string;
+    failure?: { url: string; screenshot?: string };
+  }[];
+}
 
 /** SPEC-013: LLM usage reports (see src/core/obs/usage-store.ts). */
-export interface UsageTotals { calls: number; failed: number; cached: number; retries: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; costUsd: number; unpricedCalls: number; latencyMs: number }
-export interface UsageCall { n: number; name: string; model: string; inputTokens: number; outputTokens: number; latencyMs: number; costUsd?: number; retries: number; cached: boolean; ok: boolean; error?: string }
-export interface UsageReport { id: string; action: string; site: string; actor: string; startedAt: string; status: 'ok' | 'error'; error?: string; model: string; totals: UsageTotals; calls: UsageCall[] }
-export interface UsageListing { reports: UsageReport[]; totals: UsageTotals }
+export interface UsageTotals {
+  calls: number;
+  failed: number;
+  cached: number;
+  retries: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  unpricedCalls: number;
+  latencyMs: number;
+}
+export interface UsageCall {
+  n: number;
+  name: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs: number;
+  costUsd?: number;
+  retries: number;
+  cached: boolean;
+  ok: boolean;
+  error?: string;
+}
+export interface UsageReport {
+  id: string;
+  action: string;
+  site: string;
+  actor: string;
+  startedAt: string;
+  status: 'ok' | 'error';
+  error?: string;
+  model: string;
+  totals: UsageTotals;
+  calls: UsageCall[];
+}
+export interface UsageListing {
+  reports: UsageReport[];
+  totals: UsageTotals;
+}
 
 async function j<T>(res: Response): Promise<T> {
   if (res.status === 401) notifyUnauthorized(); // SPEC-014: session expired/revoked → token screen
@@ -34,22 +133,33 @@ async function j<T>(res: Response): Promise<T> {
   if (!res.ok) throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
   return body as T;
 }
-const post = (url: string, body: unknown) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+const post = (url: string, body: unknown) =>
+  fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
 export const api = {
   config: () => fetch('/api/config').then((r) => j<Settings>(r)),
-  models: (provider: ProviderId) => fetch(`/api/models?provider=${provider}`).then((r) => j<{ provider: ProviderId; models: ModelInfo[] }>(r)),
+  models: (provider: ProviderId) =>
+    fetch(`/api/models?provider=${provider}`).then((r) => j<{ provider: ProviderId; models: ModelInfo[] }>(r)),
   awsProfiles: () => fetch('/api/aws-profiles').then((r) => j<{ profiles: string[]; selected?: string }>(r)),
   authInfo: (url: string) => fetch(`/api/auth?url=${encodeURIComponent(url)}`).then((r) => j<AuthInfo>(r)),
   sites: () => fetch('/api/sites').then((r) => j<SiteSummary[]>(r)),
   site: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}`).then((r) => j<SiteDetail>(r)),
-  test: (id: string, t: string) => fetch(`/api/sites/${encodeURIComponent(id)}/tests/${encodeURIComponent(t)}`).then((r) => j<TestDetail>(r)),
-  testCases: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}/test-cases`).then((r) => j<{ tests: TestCaseRow[] }>(r)),
-  run: (id: string, runId: string) => fetch(`/api/sites/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`).then((r) => j<RunDetail>(r)),
-  saveJourneys: (id: string, journeys: Journey[]) => fetch(`/api/sites/${encodeURIComponent(id)}/journeys`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(journeys) }).then((r) => j<Journey[]>(r)),
+  test: (id: string, t: string) =>
+    fetch(`/api/sites/${encodeURIComponent(id)}/tests/${encodeURIComponent(t)}`).then((r) => j<TestDetail>(r)),
+  testCases: (id: string) =>
+    fetch(`/api/sites/${encodeURIComponent(id)}/test-cases`).then((r) => j<{ tests: TestCaseRow[] }>(r)),
+  run: (id: string, runId: string) =>
+    fetch(`/api/sites/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`).then((r) => j<RunDetail>(r)),
+  saveJourneys: (id: string, journeys: Journey[]) =>
+    fetch(`/api/sites/${encodeURIComponent(id)}/journeys`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(journeys),
+    }).then((r) => j<Journey[]>(r)),
   usage: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}/usage`).then((r) => j<UsageListing>(r)),
   startJob: (body: unknown) => post('/api/jobs', body).then((r) => j<{ jobId: string }>(r)),
-  fileUrl: (id: string, rel: string) => `/api/sites/${encodeURIComponent(id)}/files/${rel.split('/').map(encodeURIComponent).join('/')}`,
+  fileUrl: (id: string, rel: string) =>
+    `/api/sites/${encodeURIComponent(id)}/files/${rel.split('/').map(encodeURIComponent).join('/')}`,
 };
 
 export function streamJob(jobId: string, onEvent: (e: ProgressEvent) => void, onEnd: () => void): () => void {
@@ -57,8 +167,14 @@ export function streamJob(jobId: string, onEvent: (e: ProgressEvent) => void, on
   es.onmessage = (m) => {
     const e = JSON.parse(m.data) as ProgressEvent;
     onEvent(e);
-    if (e.type === 'done' || e.type === 'error') { es.close(); onEnd(); }
+    if (e.type === 'done' || e.type === 'error') {
+      es.close();
+      onEnd();
+    }
   };
-  es.onerror = () => { es.close(); onEnd(); };
+  es.onerror = () => {
+    es.close();
+    onEnd();
+  };
   return () => es.close();
 }

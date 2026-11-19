@@ -34,7 +34,15 @@ export interface TestCase {
   targets?: TargetOutcome[];
 }
 
-export interface TargetOutcome { env?: string; project: string; browser?: string; device?: string; outcome: LastRunOutcome; runId: string; at: string }
+export interface TargetOutcome {
+  env?: string;
+  project: string;
+  browser?: string;
+  device?: string;
+  outcome: LastRunOutcome;
+  runId: string;
+  at: string;
+}
 export interface ListTestCasesOptions extends JourneyFilter {
   /** only runs of this environment count for `lastRun` / `targets` */
   env?: string;
@@ -46,7 +54,8 @@ export interface SiteTestCases {
   tests: TestCase[];
 }
 
-const outcomeOf = (s: TestResult['status']): LastRunOutcome => (s === 'passed' ? 'passed' : s === 'skipped' ? 'skipped' : 'failed');
+const outcomeOf = (s: TestResult['status']): LastRunOutcome =>
+  s === 'passed' ? 'passed' : s === 'skipped' ? 'skipped' : 'failed';
 
 /** Stored generated tests of a site with journey info and latest run outcome. `null` = unknown site. Read-only. */
 export function listTestCases(store: Store, siteId: string, opts: ListTestCasesOptions = {}): SiteTestCases | null {
@@ -68,7 +77,15 @@ export function listTestCases(store: Store, siteId: string, opts: ListTestCasesO
     for (const r of run.results) {
       if (!r.project) continue;
       const per = targets.get(r.journeyId) ?? new Map<string, TargetOutcome>();
-      per.set(`${run.env ?? ''}\u0000${r.project}`, { ...(run.env ? { env: run.env } : {}), project: r.project, ...(r.browser ? { browser: r.browser } : {}), ...(r.device ? { device: r.device } : {}), outcome: outcomeOf(r.status), runId: run.id, at: run.finishedAt });
+      per.set(`${run.env ?? ''}\u0000${r.project}`, {
+        ...(run.env ? { env: run.env } : {}),
+        project: r.project,
+        ...(r.browser ? { browser: r.browser } : {}),
+        ...(r.device ? { device: r.device } : {}),
+        outcome: outcomeOf(r.status),
+        runId: run.id,
+        at: run.finishedAt,
+      });
       targets.set(r.journeyId, per);
     }
   }

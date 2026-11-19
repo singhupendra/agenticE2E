@@ -37,7 +37,10 @@ describe('Redactor (SPEC-009 AC-8)', () => {
     expect(e.contains('anything')).toBe(false);
   });
   it('longer secrets win over secrets that are substrings of them', () => {
-    const x = new Redactor([{ value: 'pass', placeholder: '{{a}}' }, { value: 'pass-longer', placeholder: '{{b}}' }]);
+    const x = new Redactor([
+      { value: 'pass', placeholder: '{{a}}' },
+      { value: 'pass-longer', placeholder: '{{b}}' },
+    ]);
     expect(x.redact('pass-longer and pass')).toBe('{{b}} and {{a}}');
   });
 });

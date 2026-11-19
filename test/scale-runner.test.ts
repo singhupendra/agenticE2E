@@ -10,15 +10,32 @@ import { startScaleSite, OK_SPEC, FAIL_SPEC, FLAKY_SPEC, SLOW_SPEC, type ScaleSi
 const SITE = 'scale.test';
 let site: ScaleSite;
 let store: Store;
-beforeAll(async () => { site = await startScaleSite(); });
-afterAll(async () => { await site.close(); });
-beforeEach(() => { store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'scale-run-'))); });
+beforeAll(async () => {
+  site = await startScaleSite();
+});
+afterAll(async () => {
+  await site.close();
+});
+beforeEach(() => {
+  store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'scale-run-')));
+});
 
 const run = (extra: Partial<RunOptions> = {}) =>
-  runTests(store, { site: SITE, baseUrl: site.url, screenshots: 'on-failure', fullPage: false, headless: true, testTimeoutMs: 10_000, ...extra });
-const pwConfig = (runId: string) => fs.readFileSync(path.join(store.runDir(SITE, runId), 'playwright.config.mjs'), 'utf8');
+  runTests(store, {
+    site: SITE,
+    baseUrl: site.url,
+    screenshots: 'on-failure',
+    fullPage: false,
+    headless: true,
+    testTimeoutMs: 10_000,
+    ...extra,
+  });
+const pwConfig = (runId: string) =>
+  fs.readFileSync(path.join(store.runDir(SITE, runId), 'playwright.config.mjs'), 'utf8');
 function allFiles(dir: string): string[] {
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? allFiles(path.join(dir, e.name)) : [path.join(dir, e.name)]));
+  return fs
+    .readdirSync(dir, { withFileTypes: true })
+    .flatMap((e) => (e.isDirectory() ? allFiles(path.join(dir, e.name)) : [path.join(dir, e.name)]));
 }
 
 describe('SPEC-012 runner', () => {
@@ -26,7 +43,12 @@ describe('SPEC-012 runner', () => {
     store.saveTest(SITE, 'ok', OK_SPEC);
     store.saveTest(SITE, 'bad', FAIL_SPEC);
     const r = await run({ targets: resolveTargets({ browsers: ['chromium'], devices: ['Pixel 7'] }), workers: 3 });
-    expect(r.results.map((x) => `${x.journeyId}@${x.project}:${x.status}`).sort()).toEqual(['bad@Pixel 7:failed', 'bad@chromium:failed', 'ok@Pixel 7:passed', 'ok@chromium:passed']);
+    expect(r.results.map((x) => `${x.journeyId}@${x.project}:${x.status}`).sort()).toEqual([
+      'bad@Pixel 7:failed',
+      'bad@chromium:failed',
+      'ok@Pixel 7:passed',
+      'ok@chromium:passed',
+    ]);
     const mobile = r.results.find((x) => x.journeyId === 'bad' && x.project === 'Pixel 7')!;
     const desktop = r.results.find((x) => x.journeyId === 'bad' && x.project === 'chromium')!;
     expect(mobile).toMatchObject({ browser: 'chromium', device: 'Pixel 7' });
@@ -35,7 +57,8 @@ describe('SPEC-012 runner', () => {
     expect(mobile.failure?.screenshot).toBeTruthy();
     expect(mobile.failure!.screenshot).not.toBe(desktop.failure!.screenshot);
     expect(mobile.screenshots[0]).not.toBe(desktop.screenshots[0]);
-    for (const s of [mobile.failure!.screenshot!, desktop.failure!.screenshot!]) expect(fs.existsSync(path.join(store.siteDir(SITE), s))).toBe(true);
+    for (const s of [mobile.failure!.screenshot!, desktop.failure!.screenshot!])
+      expect(fs.existsSync(path.join(store.siteDir(SITE), s))).toBe(true);
     expect(r.targets?.map((t) => t.name)).toEqual(['chromium', 'Pixel 7']);
     expect(r.workers).toBe(3);
     expect(store.loadRun(SITE, r.id)!.results).toHaveLength(4);
@@ -45,7 +68,14 @@ describe('SPEC-012 runner', () => {
   it('AC-6: retries recorded; flaky pass is passed with flaky=true', async () => {
     store.saveTest(SITE, 'flaky', FLAKY_SPEC);
     const r = await run({ retries: 1 });
-    expect(r.results[0]).toMatchObject({ journeyId: 'flaky', status: 'passed', retries: 1, flaky: true, project: 'chromium', browser: 'chromium' });
+    expect(r.results[0]).toMatchObject({
+      journeyId: 'flaky',
+      status: 'passed',
+      retries: 1,
+      flaky: true,
+      project: 'chromium',
+      browser: 'chromium',
+    });
     expect(r.retries).toBe(1);
   }, 60_000);
 
@@ -54,7 +84,10 @@ describe('SPEC-012 runner', () => {
     try {
       store.saveTest(SITE, 'ok', OK_SPEC);
       const token = 'Bearer s3cr3t-token-xyz';
-      const r = await run({ baseUrl: staging.url, env: { name: 'staging', baseUrl: staging.url, headers: { 'x-env-token': token } } });
+      const r = await run({
+        baseUrl: staging.url,
+        env: { name: 'staging', baseUrl: staging.url, headers: { 'x-env-token': token } },
+      });
       expect(r.results[0]).toMatchObject({ status: 'passed', env: 'staging' });
       expect(r.env).toBe('staging');
       expect(r.baseUrl).toBe(staging.url);
@@ -63,13 +96,17 @@ describe('SPEC-012 runner', () => {
         if (/\.(png|zip|webm)$/.test(f)) continue;
         expect(fs.readFileSync(f, 'utf8'), f).not.toContain('s3cr3t-token-xyz');
       }
-    } finally { await staging.close(); }
+    } finally {
+      await staging.close();
+    }
   }, 60_000);
 
   it('review: short/boolean header values do not corrupt report.json or failure dumps', async () => {
     store.saveTest(SITE, 'ok', OK_SPEC);
     store.saveTest(SITE, 'bad', FAIL_SPEC);
-    const r = await run({ env: { name: 'dev', baseUrl: site.url, headers: { 'x-feature-flag': 'true', 'x-api-version': '123' } } });
+    const r = await run({
+      env: { name: 'dev', baseUrl: site.url, headers: { 'x-feature-flag': 'true', 'x-api-version': '123' } },
+    });
     expect(r.results.map((x) => `${x.journeyId}:${x.status}`).sort()).toEqual(['bad:failed', 'ok:passed']);
     const bad = r.results.find((x) => x.journeyId === 'bad')!;
     expect(bad.error).not.toMatch(/did not produce a result/);

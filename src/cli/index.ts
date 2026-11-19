@@ -10,7 +10,16 @@ import { parseJourneys, setStatus } from '../core/journeys.js';
 import { listModels, resolveModelId, PROVIDERS, type ProviderId } from '../core/llm/models.js';
 import { healSummary } from '../core/healer.js';
 import { ensureSession } from '../core/auth.js';
-import { createContext, discover, generate, healSelected, run, runAll, type Context, type HealTestOutcome } from '../core/pipeline.js';
+import {
+  createContext,
+  discover,
+  generate,
+  healSelected,
+  run,
+  runAll,
+  type Context,
+  type HealTestOutcome,
+} from '../core/pipeline.js';
 import { Store, normalizeSite } from '../core/storage.js';
 import { listTestCases, type LastRun } from '../core/test-cases.js';
 import type { Journey, ProgressEvent, RunRecord } from '../core/types.js';
@@ -22,7 +31,11 @@ import { AUDIT_FILE, AuditLog, cliActor, journeyStatusChanges } from '../core/ob
 import { formatUsageSummary } from '../core/llm/usage.js';
 import { addObsOptions, obsCliConfig, registerObsCommands } from './obs-commands.js';
 
-const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
+const num = (v: string) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`);
+  return n;
+};
 
 function addCommon(cmd: Command): Command {
   return addObsOptions(addScaleOptions(cmd))
@@ -33,7 +46,10 @@ function addCommon(cmd: Command): Command {
     .option('--headed', 'run browsers headed')
     .option('--provider <name>', 'LLM provider: anthropic | bedrock')
     .option('--model <id>', 'LLM model id (see `models`)')
-    .option('--aws-region <region>', 'AWS region for --provider bedrock (default: the profile\'s region, then AWS_REGION)')
+    .option(
+      '--aws-region <region>',
+      "AWS region for --provider bedrock (default: the profile's region, then AWS_REGION)",
+    )
     .option('--aws-profile <name>', 'AWS profile (see `aws-profiles`) that supplies credentials for --provider bedrock')
     .option('--max-pages <n>', 'max pages to crawl', num)
     .option('--max-depth <n>', 'max crawl depth', num)
@@ -74,7 +90,8 @@ function cliConfig(o: Record<string, unknown>): PartialConfig {
 }
 
 export function logEvent(e: ProgressEvent) {
-  const tag = e.type === 'stage' ? '\n▶' : e.type === 'warn' ? '  !' : e.type === 'error' ? '  ✗' : e.type === 'done' ? '✔' : ' ';
+  const tag =
+    e.type === 'stage' ? '\n▶' : e.type === 'warn' ? '  !' : e.type === 'error' ? '  ✗' : e.type === 'done' ? '✔' : ' ';
   console.log(`${tag} ${e.message}`);
 }
 
@@ -99,13 +116,18 @@ async function finishContexts(status: 'ok' | 'error', error?: string) {
 
 function printJourneys(journeys: Journey[]) {
   for (const j of journeys) {
-    console.log(`  [${j.status.padEnd(8)}] ${j.id}  (${j.priority}${j.rank ? `, rank ${j.rank}` : ''})\n      ${j.name} — ${j.goal}${j.tags.length ? `\n      tags: ${j.tags.join(', ')}` : ''}`);
+    console.log(
+      `  [${j.status.padEnd(8)}] ${j.id}  (${j.priority}${j.rank ? `, rank ${j.rank}` : ''})\n      ${j.name} — ${j.goal}${j.tags.length ? `\n      tags: ${j.tags.join(', ')}` : ''}`,
+    );
     j.steps.forEach((s, i) => console.log(`        ${i + 1}. ${s}`));
   }
 }
 function printRun(r: RunRecord) {
   const multi = (r.targets?.length ?? 0) > 1 || !!r.env;
-  for (const t of r.results) console.log(`  ${t.status === 'passed' ? '✔' : '✗'} ${t.journeyId}${multi && t.project ? ` (${[t.project, t.env].filter(Boolean).join(' @ ')})` : ''} [${t.status}${t.flaky ? ', flaky' : ''}] ${t.durationMs}ms${t.error ? `\n      ${t.error.split('\n')[0]}` : ''}`);
+  for (const t of r.results)
+    console.log(
+      `  ${t.status === 'passed' ? '✔' : '✗'} ${t.journeyId}${multi && t.project ? ` (${[t.project, t.env].filter(Boolean).join(' @ ')})` : ''} [${t.status}${t.flaky ? ', flaky' : ''}] ${t.durationMs}ms${t.error ? `\n      ${t.error.split('\n')[0]}` : ''}`,
+    );
 }
 
 function editJourneys(store: Store, site: string, journeys: Journey[]): Journey[] {
@@ -125,7 +147,9 @@ function editJourneys(store: Store, site: string, journeys: Journey[]): Journey[
 }
 
 export function buildProgram(setExit: (code: number) => void): Command {
-  const program = new Command('agentic-e2e').description('LLM-driven E2E test discovery, generation and self-healing on Playwright').exitOverride();
+  const program = new Command('agentic-e2e')
+    .description('LLM-driven E2E test discovery, generation and self-healing on Playwright')
+    .exitOverride();
   program.configureOutput({ writeErr: (s) => process.stderr.write(s) });
 
   addCommon(program.command('discover <url>').description('crawl a site and propose + select user journeys'))
@@ -137,7 +161,11 @@ export function buildProgram(setExit: (code: number) => void): Command {
       printJourneys(d.journeys);
     });
 
-  addJourneyTagOptions(addCommon(program.command('journeys <url>').description('show, approve, reject or edit stored journeys (incl. tags)')))
+  addJourneyTagOptions(
+    addCommon(
+      program.command('journeys <url>').description('show, approve, reject or edit stored journeys (incl. tags)'),
+    ),
+  )
     .option('--approve <ids...>', 'approve journeys by id')
     .option('--reject <ids...>', 'reject journeys by id')
     .option('--approve-all', 'approve every non-rejected journey')
@@ -151,13 +179,18 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const before = journeys;
       if (o.approve) journeys = setStatus(journeys, o.approve, 'approved');
       if (o.reject) journeys = setStatus(journeys, o.reject, 'rejected');
-      if (o.approveAll) journeys = journeys.map((j) => (j.status === 'rejected' ? j : { ...j, status: 'approved' as const }));
+      if (o.approveAll)
+        journeys = journeys.map((j) => (j.status === 'rejected' ? j : { ...j, status: 'approved' as const }));
       const tagged = applyJourneyTagOptions(journeys, o); // SPEC-012
       if (tagged) journeys = tagged;
       if (o.approve || o.reject || o.approveAll || tagged) store.saveJourneys(site, journeys);
       if (o.edit) journeys = editJourneys(store, site, journeys);
       const changes = journeyStatusChanges(before, journeys); // SPEC-013 FR-24
-      if (changes.length) new AuditLog({ file: path.join(config.dataDir, AUDIT_FILE), actor: cliActor() }).append('journeys.status_changed', { site, details: { changes, ...(o.edit ? { edited: true } : {}) } });
+      if (changes.length)
+        new AuditLog({ file: path.join(config.dataDir, AUDIT_FILE), actor: cliActor() }).append(
+          'journeys.status_changed',
+          { site, details: { changes, ...(o.edit ? { edited: true } : {}) } },
+        );
       printJourneys(journeys);
     });
 
@@ -166,8 +199,13 @@ export function buildProgram(setExit: (code: number) => void): Command {
     .option('--regenerate', 'regenerate code even if stored')
     .action(async (url: string, o) => {
       normalizeSite(url);
-      const g = await generate(await ctxFrom(o, 'generate', url), url, { regenerate: o.regenerate, rediscover: o.rediscover });
-      console.log(`\nGenerated: ${g.result.generated.join(', ') || '-'} | reused: ${g.result.skipped.join(', ') || '-'} | failed: ${g.result.failed.map((f) => f.id).join(', ') || '-'}`);
+      const g = await generate(await ctxFrom(o, 'generate', url), url, {
+        regenerate: o.regenerate,
+        rediscover: o.rediscover,
+      });
+      console.log(
+        `\nGenerated: ${g.result.generated.join(', ') || '-'} | reused: ${g.result.skipped.join(', ') || '-'} | failed: ${g.result.failed.map((f) => f.id).join(', ') || '-'}`,
+      );
       if (g.result.failed.length) setExit(1);
     });
 
@@ -183,7 +221,13 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (failed) setExit(1);
     });
 
-  addReportOptions(addCommon(program.command('heal <url> [testIds...]').description('re-run tests and self-heal the failing ones (all, the given test ids, or --failed)')))
+  addReportOptions(
+    addCommon(
+      program
+        .command('heal <url> [testIds...]')
+        .description('re-run tests and self-heal the failing ones (all, the given test ids, or --failed)'),
+    ),
+  )
     .option('--journey <ids...>', 'test/journey ids to heal (alias of the positional ids)')
     .option('--failed', 'only tests whose latest stored run outcome is failed (see list-test-cases)')
     .action(async (url: string, testIds: string[], o) => {
@@ -193,7 +237,14 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const r = await healSelected(ctx, url, { ids, failedOnly: o.failed });
       if (r.noneFailing) return; // healSelected already reported "No failing tests to heal" via progress
       if (r.run) printRun(r.run);
-      const label: Record<HealTestOutcome, string> = { healed: 'healed', app_bug: 'app_bug', flaky_or_environment: 'flaky_or_environment', failed: 'failed', already_passing: 'already passing, not healed', skipped: 'skipped, not healed' };
+      const label: Record<HealTestOutcome, string> = {
+        healed: 'healed',
+        app_bug: 'app_bug',
+        flaky_or_environment: 'flaky_or_environment',
+        failed: 'failed',
+        already_passing: 'already passing, not healed',
+        skipped: 'skipped, not healed',
+      };
       console.log('\nHeal summary:');
       for (const t of r.results) {
         const h = r.heals.find((x) => x.journeyId === t.journeyId);
@@ -201,9 +252,12 @@ export function buildProgram(setExit: (code: number) => void): Command {
       }
       for (const h of r.heals) console.log(`  ${healSummary(h)}`);
       const count = (o: HealTestOutcome) => r.results.filter((t) => t.outcome === o).length;
-      console.log(`${r.results.length} test(s): ${count('healed')} healed, ${count('app_bug')} app_bug, ${count('flaky_or_environment')} flaky_or_environment, ${count('failed')} failed, ${count('already_passing')} already passing`);
+      console.log(
+        `${r.results.length} test(s): ${count('healed')} healed, ${count('app_bug')} app_bug, ${count('flaky_or_environment')} flaky_or_environment, ${count('failed')} failed, ${count('already_passing')} already passing`,
+      );
       const healFailed = r.heals.some((h) => h.outcome !== 'healed' && h.outcome !== 'flaky_or_environment');
-      if (r.run) await reportRun(ctx, url, { mode: 'heal', runs: [r.run], heals: r.heals, exitCode: healFailed ? 1 : 0 });
+      if (r.run)
+        await reportRun(ctx, url, { mode: 'heal', runs: [r.run], heals: r.heals, exitCode: healFailed ? 1 : 0 });
       if (healFailed) setExit(1);
     });
 
@@ -215,27 +269,37 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const ctx = await ctxFrom(o, 'all', url);
       const r = await runAll(ctx, url, { rediscover: o.rediscover, regenerate: o.regenerate });
       console.log('\nFinal:');
-      for (const f of r.final) console.log(`  ${f.status === 'passed' ? '✔' : '✗'} ${f.journeyId} ${f.status}${f.healed ? ' (healed)' : ''}`);
+      for (const f of r.final)
+        console.log(`  ${f.status === 'passed' ? '✔' : '✗'} ${f.journeyId} ${f.status}${f.healed ? ' (healed)' : ''}`);
       const allFailed = r.final.some((f) => f.status !== 'passed');
       await reportRun(ctx, url, { mode: 'all', runs: [r.run], heals: r.heals, exitCode: allFailed ? 1 : 0 });
       if (allFailed) setExit(1);
     });
 
-  program.command('auth-check <url>').description('log in with the credentials file and refresh the stored session (storageState) for a site')
+  program
+    .command('auth-check <url>')
+    .description('log in with the credentials file and refresh the stored session (storageState) for a site')
     .option('--user <name>', 'user of the credentials file (default: defaultUser / the only user)')
     .option('--credentials <file>', 'credentials file (default: .agentic-e2e/credentials.json)')
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
     .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
     .option('--headed', 'run the browser headed')
-    .option('--provider <name>').option('--model <id>').option('--aws-region <region>').option('--aws-profile <name>')
+    .option('--provider <name>')
+    .option('--model <id>')
+    .option('--aws-region <region>')
+    .option('--aws-profile <name>')
     .action(async (url: string, o) => {
       const meta = normalizeSite(url);
       const ctx = await ctxFrom({ ...o, auth: true }, 'auth-check', url);
       const s = await ensureSession(ctx, url, { user: o.user, force: true });
-      console.log(`Login OK for user "${s.user}" on ${meta.id}; session saved to ${ctx.store.authStatePath(meta.id, s.user)}`);
+      console.log(
+        `Login OK for user "${s.user}" on ${meta.id}; session saved to ${ctx.store.authStatePath(meta.id, s.user)}`,
+      );
     });
 
-  program.command('models').description('list known Claude models for a provider')
+  program
+    .command('models')
+    .description('list known Claude models for a provider')
     .option('--provider <name>', 'anthropic | bedrock (default: configured provider)')
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
     .option('--data-dir <dir>')
@@ -244,36 +308,59 @@ export function buildProgram(setExit: (code: number) => void): Command {
       if (!(PROVIDERS as readonly string[]).includes(cfg.provider)) throw new Error(`Unknown provider ${cfg.provider}`);
       const provider: ProviderId = cfg.provider;
       console.log(`Models for ${provider} (any other id can be passed to --model):`);
-      for (const m of listModels(provider)) console.log(`  ${m.id.padEnd(36)} ${m.label}${m.id === resolveModelId(provider, cfg.model) ? '   <- selected' : ''}`);
-      if (provider === 'bedrock') console.log('\nRegion: --aws-region / AGENTIC_E2E_AWS_REGION / the profile\'s region / AWS_REGION. Credentials: --aws-profile / AGENTIC_E2E_AWS_PROFILE (see `aws-profiles`), else a Bedrock API key in AWS_BEARER_TOKEN_BEDROCK, else the AWS default chain. Model: --model / AGENTICQA_BEDROCK_MODEL_ID.');
+      for (const m of listModels(provider))
+        console.log(
+          `  ${m.id.padEnd(36)} ${m.label}${m.id === resolveModelId(provider, cfg.model) ? '   <- selected' : ''}`,
+        );
+      if (provider === 'bedrock')
+        console.log(
+          "\nRegion: --aws-region / AGENTIC_E2E_AWS_REGION / the profile's region / AWS_REGION. Credentials: --aws-profile / AGENTIC_E2E_AWS_PROFILE (see `aws-profiles`), else a Bedrock API key in AWS_BEARER_TOKEN_BEDROCK, else the AWS default chain. Model: --model / AGENTICQA_BEDROCK_MODEL_ID.",
+        );
     });
 
-  program.command('aws-profiles').description('list AWS profiles (from ~/.aws/config and ~/.aws/credentials) usable with --aws-profile')
+  program
+    .command('aws-profiles')
+    .description('list AWS profiles (from ~/.aws/config and ~/.aws/credentials) usable with --aws-profile')
     .option('--aws-profile <name>', 'mark this profile as selected (default: the configured one)')
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
     .option('--data-dir <dir>')
     .action(async (o) => {
       const cfg = await loadConfig({ configFile: o.config, cli: cliConfig(o) });
       const profiles = listAwsProfiles();
-      if (!profiles.length) return console.log('No AWS profiles found in ~/.aws/config or ~/.aws/credentials (or AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE). Create one with `aws configure --profile <name>`.');
-      console.log('AWS profiles (select with --aws-profile, AGENTIC_E2E_AWS_PROFILE or `awsProfile` in the config file):');
+      if (!profiles.length)
+        return console.log(
+          'No AWS profiles found in ~/.aws/config or ~/.aws/credentials (or AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE). Create one with `aws configure --profile <name>`.',
+        );
+      console.log(
+        'AWS profiles (select with --aws-profile, AGENTIC_E2E_AWS_PROFILE or `awsProfile` in the config file):',
+      );
       for (const p of profiles) console.log(`  ${p}${p === cfg.awsProfile ? '   <- selected' : ''}`);
-      if (cfg.awsProfile && !profiles.includes(cfg.awsProfile)) console.log(`\nWarning: configured profile "${cfg.awsProfile}" was not found.`);
+      if (cfg.awsProfile && !profiles.includes(cfg.awsProfile))
+        console.log(`\nWarning: configured profile "${cfg.awsProfile}" was not found.`);
     });
 
-  program.command('list').description('list known sites').option('--data-dir <dir>').option('--config <file>').action(async (o) => {
-    const config = await loadConfig({ configFile: o.config, cli: { dataDir: o.dataDir } });
-    const store = new Store(config.dataDir);
-    const sites = store.listSites();
-    if (!sites.length) return console.log(`No sites yet in ${config.dataDir}`);
-    for (const s of sites) {
-      const runs = store.listRuns(s.id);
-      const last = runs.at(-1);
-      console.log(`${s.id}  journeys=${store.loadJourneys(s.id)?.length ?? 0} tests=${store.listTests(s.id).length} runs=${runs.length}${last ? ` last=${last.results.filter((r) => r.status === 'passed').length}/${last.results.length} passed` : ''}`);
-    }
-  });
+  program
+    .command('list')
+    .description('list known sites')
+    .option('--data-dir <dir>')
+    .option('--config <file>')
+    .action(async (o) => {
+      const config = await loadConfig({ configFile: o.config, cli: { dataDir: o.dataDir } });
+      const store = new Store(config.dataDir);
+      const sites = store.listSites();
+      if (!sites.length) return console.log(`No sites yet in ${config.dataDir}`);
+      for (const s of sites) {
+        const runs = store.listRuns(s.id);
+        const last = runs.at(-1);
+        console.log(
+          `${s.id}  journeys=${store.loadJourneys(s.id)?.length ?? 0} tests=${store.listTests(s.id).length} runs=${runs.length}${last ? ` last=${last.results.filter((r) => r.status === 'passed').length}/${last.results.length} passed` : ''}`,
+        );
+      }
+    });
 
-  program.command('list-test-cases <url>').description('list the stored generated tests of a site with journey status and latest run outcome')
+  program
+    .command('list-test-cases <url>')
+    .description('list the stored generated tests of a site with journey status and latest run outcome')
     .option('--json', 'machine-readable output')
     .option('--data-dir <dir>', 'where per-site data is stored (default: ./data)')
     .option('--config <file>', 'path to agentic-e2e.config.(ts|js|json)')
@@ -286,28 +373,64 @@ export function buildProgram(setExit: (code: number) => void): Command {
       const listing = listTestCases(new Store(config.dataDir), site.id, { env: o.env, grep: o.grep, tag: o.tag });
       if (!listing) throw new Error(`Unknown site ${site.id} in ${config.dataDir}. Run: agentic-e2e discover ${url}`);
       if (o.json) return console.log(JSON.stringify(listing, null, 2));
-      if (!listing.tests.length) return console.log(`No generated tests for ${site.id} yet. Run: agentic-e2e generate ${url}`);
+      if (!listing.tests.length)
+        return console.log(`No generated tests for ${site.id} yet. Run: agentic-e2e generate ${url}`);
       const lastRun = (r: LastRun) => (r.outcome === 'never_run' ? 'never run' : `${r.outcome} ${r.at ?? ''}`.trim());
       const anyAuth = listing.tests.some((t) => t.requiresAuth); // the AUTH column only appears once a test needs a login
       const anyFlaky = listing.tests.some((t) => t.flaky); // SPEC-011: the FLAKY column only appears once a test is flaky
       const anyTags = listing.tests.some((t) => t.tags?.length); // SPEC-012
-      const rows = [['JOURNEY', 'NAME', 'STATUS', ...(anyTags ? ['TAGS'] : []), ...(anyAuth ? ['AUTH'] : []), 'LAST RUN', ...(anyFlaky ? ['FLAKY'] : []), 'SPEC FILE'], ...listing.tests.map((t) => [t.journeyId, t.name, t.journeyStatus, ...(anyTags ? [t.tags?.join(',') || '-'] : []), ...(anyAuth ? [t.requiresAuth ? t.user ?? 'yes' : '-'] : []), lastRun(t.lastRun), ...(anyFlaky ? [t.flaky ? t.flaky.reasons.join('+') : '-'] : []), t.specFile])];
+      const rows = [
+        [
+          'JOURNEY',
+          'NAME',
+          'STATUS',
+          ...(anyTags ? ['TAGS'] : []),
+          ...(anyAuth ? ['AUTH'] : []),
+          'LAST RUN',
+          ...(anyFlaky ? ['FLAKY'] : []),
+          'SPEC FILE',
+        ],
+        ...listing.tests.map((t) => [
+          t.journeyId,
+          t.name,
+          t.journeyStatus,
+          ...(anyTags ? [t.tags?.join(',') || '-'] : []),
+          ...(anyAuth ? [t.requiresAuth ? (t.user ?? 'yes') : '-'] : []),
+          lastRun(t.lastRun),
+          ...(anyFlaky ? [t.flaky ? t.flaky.reasons.join('+') : '-'] : []),
+          t.specFile,
+        ]),
+      ];
       const widths = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
       console.log(`${site.id}: ${listing.tests.length} test${listing.tests.length === 1 ? '' : 's'}`);
-      for (const r of rows) console.log(r.map((cell, c) => (c === r.length - 1 ? cell : cell.padEnd(widths[c]))).join('  '));
+      for (const r of rows)
+        console.log(r.map((cell, c) => (c === r.length - 1 ? cell : cell.padEnd(widths[c]))).join('  '));
     });
 
   registerCiCommand(program, { addCommon, cliConfig, logEvent, setExit });
 
   addCommon(program.command('serve').description('start the web UI + REST API'))
     .option('--port <n>', 'port', num, 4173)
-    .option('--host <host>', 'bind address (default 127.0.0.1; the server executes generated tests — requires API tokens unless --insecure-local)', '127.0.0.1')
+    .option(
+      '--host <host>',
+      'bind address (default 127.0.0.1; the server executes generated tests — requires API tokens unless --insecure-local)',
+      '127.0.0.1',
+    )
     .option('--tokens-file <file>', 'hashed API tokens file (see `token create`); also AGENTIC_E2E_API_TOKENS(_FILE)')
     .option('--insecure-local', 'no authentication (loopback only; every local request is admin)')
     .action(async (o) => {
-      const config = await loadConfig({ configFile: o.config, cli: { ...cliConfig(o), ...(o.tokensFile ? { server: { tokensFile: o.tokensFile } as Config['server'] } : {}) } });
+      const config = await loadConfig({
+        configFile: o.config,
+        cli: { ...cliConfig(o), ...(o.tokensFile ? { server: { tokensFile: o.tokensFile } as Config['server'] } : {}) },
+      });
       const { startServer } = await import('../server/index.js');
-      const { url } = await startServer({ config, port: o.port, host: o.host, insecureLocal: !!o.insecureLocal, handleSignals: true });
+      const { url } = await startServer({
+        config,
+        port: o.port,
+        host: o.host,
+        insecureLocal: !!o.insecureLocal,
+        handleSignals: true,
+      });
       console.log(`agentic-e2e UI: ${url}`);
       await new Promise(() => {}); // run until a signal triggers the graceful shutdown (SPEC-014)
     });
@@ -321,7 +444,9 @@ export function buildProgram(setExit: (code: number) => void): Command {
 
 export async function main(argv: string[]): Promise<number> {
   let exit = 0;
-  const program = buildProgram((c) => { exit = c; });
+  const program = buildProgram((c) => {
+    exit = c;
+  });
   try {
     await program.parseAsync(argv);
     await finishContexts(exit ? 'error' : 'ok');

@@ -24,7 +24,9 @@ const PUBLIC_API = new Set(['/api/health', '/api/session']);
 const MAX_SESSIONS = 10_000;
 
 declare module 'fastify' {
-  interface FastifyRequest { principal?: Principal | null }
+  interface FastifyRequest {
+    principal?: Principal | null;
+  }
 }
 
 /**
@@ -65,10 +67,15 @@ class SessionStore {
     if (!id) return null;
     const s = this.sessions.get(id);
     if (!s) return null;
-    if (s.expires < Date.now()) { this.sessions.delete(id); return null; }
+    if (s.expires < Date.now()) {
+      this.sessions.delete(id);
+      return null;
+    }
     return s.principal;
   }
-  delete(id: string | undefined) { if (id) this.sessions.delete(id); }
+  delete(id: string | undefined) {
+    if (id) this.sessions.delete(id);
+  }
 }
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -79,20 +86,36 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stri
  * server-only keys like `environments`, which the UI round-trips in their public form, are dropped by both). A request
  * that does not parse never runs (the handler answers 400), so only its action decides the role.
  */
-export function requiredRole(method: string, routeUrl: string | undefined, body: unknown, base: Config): { role: Role; reason?: string } {
+export function requiredRole(
+  method: string,
+  routeUrl: string | undefined,
+  body: unknown,
+  base: Config,
+): { role: Role; reason?: string } {
   if (method === 'GET' || method === 'HEAD') return { role: 'viewer' };
   if (method === 'POST' && routeUrl === '/api/jobs') {
     const action = String((body as { action?: unknown } | null)?.action);
     if (!OPERATOR_ACTIONS.has(action)) return { role: 'admin' };
     let opts: Record<string, unknown>;
-    try { opts = (parseJobRequest(body).options ?? {}) as Record<string, unknown>; } catch { return { role: 'operator' }; }
-    const changed = Object.keys(opts).filter((k) => !OPERATOR_JOB_OPTIONS.has(k) && !same(opts[k], (base as Record<string, unknown>)[k]));
-    return changed.length ? { role: 'admin', reason: `changing settings (${changed.join(', ')})` } : { role: 'operator' };
+    try {
+      opts = (parseJobRequest(body).options ?? {}) as Record<string, unknown>;
+    } catch {
+      return { role: 'operator' };
+    }
+    const changed = Object.keys(opts).filter(
+      (k) => !OPERATOR_JOB_OPTIONS.has(k) && !same(opts[k], (base as Record<string, unknown>)[k]),
+    );
+    return changed.length
+      ? { role: 'admin', reason: `changing settings (${changed.join(', ')})` }
+      : { role: 'operator' };
   }
   return { role: 'admin' };
 }
 
-export async function registerSecurity(app: FastifyInstance, opts: { config: Config; auth: AuthOptions; lifecycle: Lifecycle; storage: StorageBackend }) {
+export async function registerSecurity(
+  app: FastifyInstance,
+  opts: { config: Config; auth: AuthOptions; lifecycle: Lifecycle; storage: StorageBackend },
+) {
   const { server } = opts.config;
   const sessions = new SessionStore(server.sessionTtlMs);
   const authRequired = opts.auth.mode === 'tokens';
@@ -102,8 +125,16 @@ export async function registerSecurity(app: FastifyInstance, opts: { config: Con
     contentSecurityPolicy: {
       useDefaults: false,
       directives: {
-        defaultSrc: ["'self'"], imgSrc: ["'self'", 'data:', 'blob:'], styleSrc: ["'self'", "'unsafe-inline'"], scriptSrc: ["'self'"],
-        connectSrc: ["'self'"], fontSrc: ["'self'", 'data:'], frameAncestors: ["'none'"], objectSrc: ["'none'"], baseUri: ["'self'"], formAction: ["'self'"],
+        defaultSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:', 'blob:'],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'", 'data:'],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
       },
     },
     referrerPolicy: { policy: 'no-referrer' },
@@ -120,49 +151,68 @@ export async function registerSecurity(app: FastifyInstance, opts: { config: Con
     timeWindow: server.rateLimit.timeWindowMs,
     keyGenerator: (req) => req.ip,
     allowList: (req) => HEALTH.has(routeOf(req) ?? ''),
-    errorResponseBuilder: (_req, ctx) => ({ statusCode: 429, error: 'Too many requests', message: `Rate limit exceeded; retry in ${ctx.after}` }),
+    errorResponseBuilder: (_req, ctx) => ({
+      statusCode: 429,
+      error: 'Too many requests',
+      message: `Rate limit exceeded; retry in ${ctx.after}`,
+    }),
   });
 
   const principalOf = (req: FastifyRequest): Principal | null => {
     if (!authRequired) return LOCAL_ADMIN;
     return tokens!.verify(bearerOf(req)) ?? sessions.get(cookieOf(req, SESSION_COOKIE));
   };
-  const deny401 = (reply: FastifyReply) => reply.code(401).header('www-authenticate', 'Bearer realm="agentic-e2e"').send({ error: 'Authentication required' });
+  const deny401 = (reply: FastifyReply) =>
+    reply.code(401).header('www-authenticate', 'Bearer realm="agentic-e2e"').send({ error: 'Authentication required' });
 
   app.decorateRequest('principal', null);
   app.addHook('onRequest', async (req, reply) => {
     req.principal = principalOf(req);
-    if (opts.lifecycle.draining && req.method === 'POST' && routeOf(req) === '/api/jobs') return reply.code(503).send({ error: 'Server is shutting down' });
+    if (opts.lifecycle.draining && req.method === 'POST' && routeOf(req) === '/api/jobs')
+      return reply.code(503).send({ error: 'Server is shutting down' });
     if (!isPublic(req) && !req.principal) return deny401(reply);
   });
   app.addHook('preHandler', async (req, reply) => {
     if (isPublic(req)) return;
     const need = requiredRole(req.method, routeOf(req), req.body, opts.config);
-    if (!roleAtLeast(req.principal!.role, need.role)) return reply.code(403).send({ error: `Requires role ${need.role}${need.reason ? ` for ${need.reason}` : ''}` });
+    if (!roleAtLeast(req.principal!.role, need.role))
+      return reply.code(403).send({ error: `Requires role ${need.role}${need.reason ? ` for ${need.reason}` : ''}` });
   });
 
   // Liveness: no I/O. Readiness: not draining and storage writable. Bodies never carry paths or error details.
   app.get('/healthz', { config: { rateLimit: false } }, async () => ({ status: 'ok' }));
   app.get('/readyz', { config: { rateLimit: false } }, async (_req, reply) => {
     if (opts.lifecycle.draining) return reply.code(503).send({ status: 'draining' });
-    try { await opts.storage.healthCheck(); } catch { return reply.code(503).send({ status: 'unavailable' }); }
+    try {
+      await opts.storage.healthCheck();
+    } catch {
+      return reply.code(503).send({ status: 'unavailable' });
+    }
     return { status: 'ready' };
   });
 
-  const status = (p: Principal | null) => ({ authRequired, authenticated: !!p, ...(p ? { name: p.name, role: p.role } : {}) });
+  const status = (p: Principal | null) => ({
+    authRequired,
+    authenticated: !!p,
+    ...(p ? { name: p.name, role: p.role } : {}),
+  });
   const cookie = (req: FastifyRequest, value: string, maxAgeS: number) =>
     `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeS}${req.protocol === 'https' ? '; Secure' : ''}`;
 
   app.get('/api/session', async (req) => status(req.principal ?? null));
-  app.post('/api/session', { config: { rateLimit: { max: server.rateLimit.loginMax, timeWindow: server.rateLimit.timeWindowMs } } }, async (req, reply) => {
-    if (!authRequired) return status(LOCAL_ADMIN);
-    const bodyToken = (req.body as { token?: unknown } | null)?.token;
-    const p = tokens!.verify(bearerOf(req) ?? (typeof bodyToken === 'string' ? bodyToken : undefined));
-    if (!p) return deny401(reply);
-    const id = sessions.create(p);
-    reply.header('set-cookie', cookie(req, id, Math.floor(server.sessionTtlMs / 1000)));
-    return status(p);
-  });
+  app.post(
+    '/api/session',
+    { config: { rateLimit: { max: server.rateLimit.loginMax, timeWindow: server.rateLimit.timeWindowMs } } },
+    async (req, reply) => {
+      if (!authRequired) return status(LOCAL_ADMIN);
+      const bodyToken = (req.body as { token?: unknown } | null)?.token;
+      const p = tokens!.verify(bearerOf(req) ?? (typeof bodyToken === 'string' ? bodyToken : undefined));
+      if (!p) return deny401(reply);
+      const id = sessions.create(p);
+      reply.header('set-cookie', cookie(req, id, Math.floor(server.sessionTtlMs / 1000)));
+      return status(p);
+    },
+  );
   app.delete('/api/session', async (req, reply) => {
     sessions.delete(cookieOf(req, SESSION_COOKIE));
     reply.header('set-cookie', cookie(req, '', 0));

@@ -1,7 +1,10 @@
 export const PROVIDERS = ['anthropic', 'bedrock'] as const;
 export type ProviderId = (typeof PROVIDERS)[number];
 
-export interface ModelInfo { id: string; label: string }
+export interface ModelInfo {
+  id: string;
+  label: string;
+}
 
 /** Known Claude models, by bare (Anthropic API) id. Static: anything else can still be typed in as a custom id. */
 const CATALOG: ModelInfo[] = [
@@ -38,7 +41,12 @@ export function supportsForcedToolChoice(model: string): boolean {
 }
 
 /** SPEC-013: USD per million tokens. `cacheWrite` is the 5-minute TTL write price. */
-export interface ModelPricing { input: number; output: number; cacheWrite: number; cacheRead: number }
+export interface ModelPricing {
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+}
 
 /**
  * Anthropic first-party list prices (Claude API, November 2026). Bedrock is billed by AWS at its own rates, so costs
@@ -60,7 +68,8 @@ const PRICING_KEYS = Object.keys(PRICING).sort((a, b) => b.length - a.length);
 
 /** Strips Bedrock vendor / inference-profile prefixes and `-YYYYMMDD` / `-v1:0` / `@date` suffixes. */
 function bareModelId(id: string): string {
-  return id.toLowerCase()
+  return id
+    .toLowerCase()
     .replace(/^(arn:.*\/)?/, '')
     .replace(/^((us|eu|apac|global|us-gov|jp|au|ca)\.)?anthropic\./, '')
     .replace(/(-v\d+(:\d+)?)$/, '')
@@ -69,12 +78,25 @@ function bareModelId(id: string): string {
 
 export function modelPricing(model: string): ModelPricing | undefined {
   const bare = bareModelId(model);
-  const key = PRICING_KEYS.find((k) => bare === k || (bare.startsWith(k) && /^[-@:]/.test(bare.slice(k.length)) && !/^-\d+(-|$)/.test(bare.slice(k.length))));
+  const key = PRICING_KEYS.find(
+    (k) =>
+      bare === k ||
+      (bare.startsWith(k) && /^[-@:]/.test(bare.slice(k.length)) && !/^-\d+(-|$)/.test(bare.slice(k.length))),
+  );
   return key ? PRICING[key] : undefined;
 }
 
-export function estimateCostUsd(model: string, u: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }): number | undefined {
+export function estimateCostUsd(
+  model: string,
+  u: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number },
+): number | undefined {
   const p = modelPricing(model);
   if (!p) return undefined;
-  return (u.inputTokens * p.input + u.outputTokens * p.output + u.cacheReadTokens * p.cacheRead + u.cacheWriteTokens * p.cacheWrite) / 1e6;
+  return (
+    (u.inputTokens * p.input +
+      u.outputTokens * p.output +
+      u.cacheReadTokens * p.cacheRead +
+      u.cacheWriteTokens * p.cacheWrite) /
+    1e6
+  );
 }

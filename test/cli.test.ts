@@ -7,13 +7,26 @@ import { Store } from '../src/core/storage.js';
 import type { Journey } from '../src/core/types.js';
 import { fakeAwsFiles, SAMPLE_CONFIG, SAMPLE_CREDENTIALS } from './helpers/aws-files.js';
 
-const j = (id: string, status: Journey['status'] = 'selected'): Journey => ({ id, name: `Journey ${id}`, goal: 'g', priority: 'high', tags: [], steps: ['a'], status });
+const j = (id: string, status: Journey['status'] = 'selected'): Journey => ({
+  id,
+  name: `Journey ${id}`,
+  goal: 'g',
+  priority: 'high',
+  tags: [],
+  steps: ['a'],
+  status,
+});
 let dir: string, out: string[], err: string[];
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cli-'));
-  out = []; err = [];
-  vi.spyOn(console, 'log').mockImplementation((...a) => { out.push(a.join(' ')); });
-  vi.spyOn(console, 'error').mockImplementation((...a) => { err.push(a.join(' ')); });
+  out = [];
+  err = [];
+  vi.spyOn(console, 'log').mockImplementation((...a) => {
+    out.push(a.join(' '));
+  });
+  vi.spyOn(console, 'error').mockImplementation((...a) => {
+    err.push(a.join(' '));
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 const cli = (...args: string[]) => main(['node', 'agentic-e2e', ...args, '--data-dir', dir]);
@@ -78,8 +91,12 @@ describe('cli', () => {
   describe('SPEC-003 aws-profiles', () => {
     const saved = { c: process.env.AWS_CONFIG_FILE, k: process.env.AWS_SHARED_CREDENTIALS_FILE };
     afterEach(() => {
-      for (const [n, v] of [['AWS_CONFIG_FILE', saved.c], ['AWS_SHARED_CREDENTIALS_FILE', saved.k]] as const) {
-        if (v === undefined) delete process.env[n]; else process.env[n] = v;
+      for (const [n, v] of [
+        ['AWS_CONFIG_FILE', saved.c],
+        ['AWS_SHARED_CREDENTIALS_FILE', saved.k],
+      ] as const) {
+        if (v === undefined) delete process.env[n];
+        else process.env[n] = v;
       }
     });
 

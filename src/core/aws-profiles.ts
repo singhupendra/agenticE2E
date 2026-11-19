@@ -9,7 +9,8 @@ type Section = { name: string; kind: 'profile' | 'other'; values: Map<string, st
 const REGION = /^[a-z]{2}(-[a-z0-9]+)+-\d+$/;
 
 const configPath = (env: Env) => env.AWS_CONFIG_FILE || path.join(env.HOME || os.homedir(), '.aws', 'config');
-const credentialsPath = (env: Env) => env.AWS_SHARED_CREDENTIALS_FILE || path.join(env.HOME || os.homedir(), '.aws', 'credentials');
+const credentialsPath = (env: Env) =>
+  env.AWS_SHARED_CREDENTIALS_FILE || path.join(env.HOME || os.homedir(), '.aws', 'credentials');
 
 /**
  * Minimal INI reader: sections and `key = value` lines only. In the config file a profile section is `[default]` or
@@ -18,7 +19,11 @@ const credentialsPath = (env: Env) => env.AWS_SHARED_CREDENTIALS_FILE || path.jo
  */
 function readSections(file: string, isConfigFile: boolean): Section[] {
   let text: string;
-  try { text = fs.readFileSync(file, 'utf8'); } catch { return []; }
+  try {
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return [];
+  }
   const sections: Section[] = [];
   let cur: Section | undefined;
   for (const raw of text.split(/\r?\n/)) {
@@ -31,7 +36,9 @@ function readSections(file: string, isConfigFile: boolean): Section[] {
       else if (title === 'default') cur = { name: 'default', kind: 'profile', values: new Map() };
       else {
         const m = /^profile\s+(.+)$/.exec(title);
-        cur = m ? { name: m[1].trim(), kind: 'profile', values: new Map() } : { name: title, kind: 'other', values: new Map() };
+        cur = m
+          ? { name: m[1].trim(), kind: 'profile', values: new Map() }
+          : { name: title, kind: 'other', values: new Map() };
       }
       sections.push(cur);
       continue;

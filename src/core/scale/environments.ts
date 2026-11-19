@@ -16,7 +16,10 @@ export interface ResolvedEnvironment {
 
 /** Errors whose detail (env var names) stays on the CLI / server log; web clients get `publicMessage` (SPEC-009 FR). */
 export class EnvironmentError extends CredentialsError {
-  constructor(message: string, publicMessage: string) { super(message, publicMessage); this.name = 'EnvironmentError'; }
+  constructor(message: string, publicMessage: string) {
+    super(message, publicMessage);
+    this.name = 'EnvironmentError';
+  }
 }
 
 const VAR_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
@@ -35,7 +38,9 @@ export function resolveEnvironment(
   const e = all[cfg.env];
   if (!e) {
     const names = Object.keys(all);
-    throw new Error(`Unknown environment "${cfg.env}". Configured environments: ${names.length ? names.join(', ') : '(none — add "environments" to the config file)'}`);
+    throw new Error(
+      `Unknown environment "${cfg.env}". Configured environments: ${names.length ? names.join(', ') : '(none — add "environments" to the config file)'}`,
+    );
   }
   const interpolated: string[] = [];
   const headers: Record<string, string> = {};
@@ -52,7 +57,14 @@ export function resolveEnvironment(
       return val;
     });
   }
-  return { name: cfg.env, baseUrl: e.baseUrl, origin: new URL(e.baseUrl).origin, headers, readOnly: isReadOnlyEnv(cfg.env, e.readOnly), interpolated };
+  return {
+    name: cfg.env,
+    baseUrl: e.baseUrl,
+    origin: new URL(e.baseUrl).origin,
+    headers,
+    readOnly: isReadOnlyEnv(cfg.env, e.readOnly),
+    interpolated,
+  };
 }
 
 /** Values for the redactor (FR-10). */
@@ -63,6 +75,13 @@ export function environmentSecrets(e: ResolvedEnvironment | null): SecretEntry[]
 }
 
 /** FR-24: what `/api/config` may show — header names, never values. */
-export function publicEnvironments(all: Record<string, EnvironmentConfig> = {}): Record<string, { baseUrl: string; readOnly: boolean; headers: string[] }> {
-  return Object.fromEntries(Object.entries(all).map(([name, e]) => [name, { baseUrl: e.baseUrl, readOnly: isReadOnlyEnv(name, e.readOnly), headers: Object.keys(e.headers ?? {}) }]));
+export function publicEnvironments(
+  all: Record<string, EnvironmentConfig> = {},
+): Record<string, { baseUrl: string; readOnly: boolean; headers: string[] }> {
+  return Object.fromEntries(
+    Object.entries(all).map(([name, e]) => [
+      name,
+      { baseUrl: e.baseUrl, readOnly: isReadOnlyEnv(name, e.readOnly), headers: Object.keys(e.headers ?? {}) },
+    ]),
+  );
 }

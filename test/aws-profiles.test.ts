@@ -11,7 +11,12 @@ describe('AWS profile discovery (SPEC-003)', () => {
 
   it('AC-5: missing files -> []; env vars choose the file paths', () => {
     expect(listAwsProfiles(fakeAwsFiles())).toEqual([]);
-    expect(listAwsProfiles({ AWS_CONFIG_FILE: path.join('/nonexistent', 'x'), AWS_SHARED_CREDENTIALS_FILE: path.join('/nonexistent', 'y') })).toEqual([]);
+    expect(
+      listAwsProfiles({
+        AWS_CONFIG_FILE: path.join('/nonexistent', 'x'),
+        AWS_SHARED_CREDENTIALS_FILE: path.join('/nonexistent', 'y'),
+      }),
+    ).toEqual([]);
     expect(listAwsProfiles(fakeAwsFiles('[profile only-config]\n'))).toEqual(['only-config']);
     expect(listAwsProfiles(fakeAwsFiles(undefined, '[only-creds]\n'))).toEqual(['only-creds']);
   });

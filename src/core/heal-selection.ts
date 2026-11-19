@@ -18,12 +18,20 @@ export interface HealSelection {
 }
 
 export class UnknownSiteError extends Error {
-  constructor(public site: string) { super(`Unknown site ${site}`); this.name = 'UnknownSiteError'; }
+  constructor(public site: string) {
+    super(`Unknown site ${site}`);
+    this.name = 'UnknownSiteError';
+  }
 }
 
 export class HealSelectionError extends Error {
-  constructor(public unknownIds: string[], public validIds: string[]) {
-    super(`Unknown test id${unknownIds.length === 1 ? '' : 's'}: ${unknownIds.join(', ')}. Valid ids: ${validIds.length ? validIds.join(', ') : '(none)'}`);
+  constructor(
+    public unknownIds: string[],
+    public validIds: string[],
+  ) {
+    super(
+      `Unknown test id${unknownIds.length === 1 ? '' : 's'}: ${unknownIds.join(', ')}. Valid ids: ${validIds.length ? validIds.join(', ') : '(none)'}`,
+    );
     this.name = 'HealSelectionError';
   }
 }

@@ -23,11 +23,20 @@ export interface UsageReport {
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 /** Validates the site id exactly like the Store does (no traversal, no odd characters). */
-const prefixOf = (site: string) => { new Store('/').siteDir(site); return `sites/${site}/usage/`; };
+const prefixOf = (site: string) => {
+  new Store('/').siteDir(site);
+  return `sites/${site}/usage/`;
+};
 /** SPEC-014 FR-30: reports go through a StorageBackend; a data dir path means the default filesystem backend. */
-const backendOf = (s: StorageBackend | string): StorageBackend => (typeof s === 'string' ? new FilesystemBackend(s) : s);
+const backendOf = (s: StorageBackend | string): StorageBackend =>
+  typeof s === 'string' ? new FilesystemBackend(s) : s;
 
-export async function saveUsageReport(storage: StorageBackend | string, site: string, report: UsageReport, redactor: Redactor = Redactor.empty()): Promise<string> {
+export async function saveUsageReport(
+  storage: StorageBackend | string,
+  site: string,
+  report: UsageReport,
+  redactor: Redactor = Redactor.empty(),
+): Promise<string> {
   if (!ID_RE.test(report.id)) throw new Error(`Invalid usage report id: ${JSON.stringify(report.id)}`);
   const key = `${prefixOf(site)}${report.id}.json`;
   await backendOf(storage).write(key, redactor.redact(JSON.stringify(report, null, 2)) + '\n');
@@ -39,8 +48,15 @@ export async function listUsageReports(storage: StorageBackend | string, site: s
   const backend = backendOf(storage);
   const prefix = prefixOf(site);
   const out: UsageReport[] = [];
-  for (const key of (await backend.list(prefix)).filter((k) => k.endsWith('.json') && !k.slice(prefix.length).includes('/'))) {
-    try { const b = await backend.read(key); if (b) out.push(JSON.parse(b.toString('utf8')) as UsageReport); } catch { /* skip */ }
+  for (const key of (await backend.list(prefix)).filter(
+    (k) => k.endsWith('.json') && !k.slice(prefix.length).includes('/'),
+  )) {
+    try {
+      const b = await backend.read(key);
+      if (b) out.push(JSON.parse(b.toString('utf8')) as UsageReport);
+    } catch {
+      /* skip */
+    }
   }
   return out.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }

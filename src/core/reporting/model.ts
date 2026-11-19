@@ -37,7 +37,14 @@ export interface ReportTest {
   /** SPEC-013 FR-31: LLM usage spent on this row's journey (codegen + heal); shared by all browser/device rows of the journey */
   llm?: UsageTotals;
 }
-export interface ReportTotals { tests: number; passed: number; failed: number; skipped: number; healed: number; flaky: number }
+export interface ReportTotals {
+  tests: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  healed: number;
+  flaky: number;
+}
 export interface RunReport {
   schemaVersion: 1;
   tool: 'agentic-e2e';
@@ -48,7 +55,10 @@ export interface RunReport {
   totals: ReportTotals;
   tests: ReportTest[];
   /** SPEC-013 FR-31: LLM usage of the command that produced the report (absent when it made no LLM calls) */
-  llm?: { totals: UsageTotals; /** run-level calls (planning, login) not tied to a journey */ unattributed: UsageTotals };
+  llm?: {
+    totals: UsageTotals;
+    /** run-level calls (planning, login) not tied to a journey */ unattributed: UsageTotals;
+  };
 }
 
 export interface BuildReportInput {
@@ -64,16 +74,23 @@ export interface BuildReportInput {
   llm?: readonly LLMCallRecord[];
 }
 
-const ms = (s: string) => { const t = Date.parse(s); return Number.isFinite(t) ? t : NaN; };
+const ms = (s: string) => {
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : NaN;
+};
 
 export function buildRunReport(input: BuildReportInput): RunReport {
   const [primary, ...later] = input.runs;
   if (!primary) throw new Error('buildRunReport needs at least one run');
   const names = new Map((input.journeys ?? []).map((j) => [j.id, j.name]));
   const multi = (primary.targets?.length ?? 0) > 1;
-  const sameRow = (a: TestResult, b: TestResult) => a.journeyId === b.journeyId && (a.project ?? '') === (b.project ?? '');
+  const sameRow = (a: TestResult, b: TestResult) =>
+    a.journeyId === b.journeyId && (a.project ?? '') === (b.project ?? '');
   const llmCalls = input.llm ?? [];
-  const llmOf = (journeyId: string) => { const c = llmCalls.filter((x) => x.journeyId === journeyId); return c.length ? summarizeCalls(c) : undefined; };
+  const llmOf = (journeyId: string) => {
+    const c = llmCalls.filter((x) => x.journeyId === journeyId);
+    return c.length ? summarizeCalls(c) : undefined;
+  };
   const tests = primary.results.map((first): ReportTest => {
     const llm = llmOf(first.journeyId);
     const attempts = [first, ...later.flatMap((r) => r.results.filter((x) => sameRow(x, first)))];
@@ -82,8 +99,13 @@ export function buildRunReport(input: BuildReportInput): RunReport {
     let outcome: ReportOutcome = last.status === 'passed' ? 'passed' : last.status === 'skipped' ? 'skipped' : 'failed';
     if (outcome === 'failed' && h?.outcome === 'healed') outcome = 'healed';
     else if (outcome === 'failed' && h?.outcome === 'flaky_or_environment') outcome = 'passed';
-    const screenshots = [...new Set(attempts.flatMap((a) => [...a.screenshots, ...(a.failure?.screenshot ? [a.failure.screenshot] : [])]))];
-    const trace = attempts.map((a) => a.tracePath).filter(Boolean).at(-1);
+    const screenshots = [
+      ...new Set(attempts.flatMap((a) => [...a.screenshots, ...(a.failure?.screenshot ? [a.failure.screenshot] : [])])),
+    ];
+    const trace = attempts
+      .map((a) => a.tracePath)
+      .filter(Boolean)
+      .at(-1);
     const flaky = input.flaky?.[first.journeyId];
     const errorOf = [...attempts].reverse().find((a) => a.error)?.error;
     return {
@@ -95,7 +117,17 @@ export function buildRunReport(input: BuildReportInput): RunReport {
       attempts: attempts.length,
       ...(outcome === 'failed' || outcome === 'skipped' ? (errorOf ? { error: errorOf } : {}) : {}),
       ...(flaky?.flaky ? { flaky } : {}),
-      ...(h ? { heal: { outcome: h.outcome, verdict: h.verdict, reason: h.reason, diff: h.diff, candidateDiff: h.candidateDiff } } : {}),
+      ...(h
+        ? {
+            heal: {
+              outcome: h.outcome,
+              verdict: h.verdict,
+              reason: h.reason,
+              diff: h.diff,
+              candidateDiff: h.candidateDiff,
+            },
+          }
+        : {}),
       ...(first.project ? { project: first.project } : {}),
       ...(first.browser ? { browser: first.browser } : {}),
       ...(first.device ? { device: first.device } : {}),
@@ -114,15 +146,36 @@ export function buildRunReport(input: BuildReportInput): RunReport {
     generatedAt: input.generatedAt ?? new Date().toISOString(),
     site: { id: input.site.id, origin: input.site.origin },
     mode: input.mode,
-    run: { id: primary.id, kind: primary.kind, startedAt: primary.startedAt, finishedAt, durationMs: Number.isFinite(dur) && dur > 0 ? dur : 0 },
-    totals: { tests: tests.length, passed: count('passed'), failed: count('failed'), skipped: count('skipped'), healed: count('healed'), flaky: tests.filter((t) => t.flaky).length },
+    run: {
+      id: primary.id,
+      kind: primary.kind,
+      startedAt: primary.startedAt,
+      finishedAt,
+      durationMs: Number.isFinite(dur) && dur > 0 ? dur : 0,
+    },
+    totals: {
+      tests: tests.length,
+      passed: count('passed'),
+      failed: count('failed'),
+      skipped: count('skipped'),
+      healed: count('healed'),
+      flaky: tests.filter((t) => t.flaky).length,
+    },
     tests,
-    ...(llmCalls.length ? { llm: { totals: summarizeCalls(llmCalls), unattributed: summarizeCalls(llmCalls.filter((c) => !c.journeyId)) } } : {}),
+    ...(llmCalls.length
+      ? {
+          llm: { totals: summarizeCalls(llmCalls), unattributed: summarizeCalls(llmCalls.filter((c) => !c.journeyId)) },
+        }
+      : {}),
   };
 }
 
 /** First non-empty line, trimmed and bounded. */
 export function firstLine(s: string | undefined, max = 200): string {
-  const l = (s ?? '').split('\n').map((x) => x.trim()).find(Boolean) ?? '';
+  const l =
+    (s ?? '')
+      .split('\n')
+      .map((x) => x.trim())
+      .find(Boolean) ?? '';
   return l.length > max ? `${l.slice(0, max - 1)}…` : l;
 }

@@ -23,12 +23,16 @@ export interface StorageBackend {
 }
 
 export class InvalidKeyError extends Error {
-  constructor(key: string) { super(`Invalid storage key ${JSON.stringify(key)}`); this.name = 'InvalidKeyError'; }
+  constructor(key: string) {
+    super(`Invalid storage key ${JSON.stringify(key)}`);
+    this.name = 'InvalidKeyError';
+  }
 }
 
 /** Validate an object key: relative, POSIX, no empty / `.` / `..` segments, no backslash or NUL. */
 export function assertKey(key: string): string {
-  if (typeof key !== 'string' || key === '' || key.includes('\0') || key.includes('\\') || key.startsWith('/')) throw new InvalidKeyError(key);
+  if (typeof key !== 'string' || key === '' || key.includes('\0') || key.includes('\\') || key.startsWith('/'))
+    throw new InvalidKeyError(key);
   if (key.split('/').some((s) => s === '' || s === '.' || s === '..')) throw new InvalidKeyError(key);
   return key;
 }

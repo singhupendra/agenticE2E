@@ -8,7 +8,10 @@ import { describeStorageContract } from './helpers/storage-contract.js';
 
 describeStorageContract('filesystem', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fsb-'));
-  return { backend: new FilesystemBackend(root), cleanup: async () => fs.rmSync(root, { recursive: true, force: true }) };
+  return {
+    backend: new FilesystemBackend(root),
+    cleanup: async () => fs.rmSync(root, { recursive: true, force: true }),
+  };
 });
 
 describe('SPEC-014 storage factory', () => {

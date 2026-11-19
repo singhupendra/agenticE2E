@@ -7,7 +7,11 @@ import type { LLMProvider, StructuredRequest } from './types.js';
  * codegen/heal can *detect and reject* a generated secret instead of silently turning it into a placeholder.
  */
 export class RedactingLLM implements LLMProvider {
-  constructor(private inner: LLMProvider, private redactor: Redactor, private opts: { dropImages: boolean }) {}
+  constructor(
+    private inner: LLMProvider,
+    private redactor: Redactor,
+    private opts: { dropImages: boolean },
+  ) {}
   structured<T>(req: StructuredRequest<T>): Promise<T> {
     const { images, ...rest } = req;
     return this.inner.structured({

@@ -22,7 +22,9 @@ describe('validateSpec', () => {
   });
 
   it('AC-20: rejects code without expect()', async () => {
-    const r = await validateSpec(`import { test } from './_support';\ntest('x', async ({ page }) => { await page.goto('/'); });`);
+    const r = await validateSpec(
+      `import { test } from './_support';\ntest('x', async ({ page }) => { await page.goto('/'); });`,
+    );
     expect(r.ok).toBe(false);
     expect(r.errors.join(' ')).toMatch(/expect/);
   });
@@ -30,8 +32,12 @@ describe('validateSpec', () => {
   it('rejects skipped/only tests, missing test(), and direct playwright import', async () => {
     expect((await validateSpec(GOOD_SPEC.replace("test('home", "test.skip('home"))).errors.join(' ')).toMatch(/skip/);
     expect((await validateSpec(GOOD_SPEC.replace("test('home", "test.only('home"))).errors.join(' ')).toMatch(/only/);
-    expect((await validateSpec(`import { expect } from './_support';\nexpect(1).toBe(1);`)).errors.join(' ')).toMatch(/test\(/);
-    expect((await validateSpec(GOOD_SPEC.replace("'./_support'", "'@playwright/test'"))).errors.join(' ')).toMatch(/_support/);
+    expect((await validateSpec(`import { expect } from './_support';\nexpect(1).toBe(1);`)).errors.join(' ')).toMatch(
+      /test\(/,
+    );
+    expect((await validateSpec(GOOD_SPEC.replace("'./_support'", "'@playwright/test'"))).errors.join(' ')).toMatch(
+      /_support/,
+    );
   });
 });
 
@@ -45,11 +51,11 @@ describe('validateSpec security restrictions', () => {
     ['side-effect import', "import 'node:os';", /import/],
     ['re-export', "export * from 'node:fs';", /import|export/],
     ['require', "const f = require('fs');", /require/],
-    ['process.env', "const k = process.env.ANTHROPIC_API_KEY;", /process/],
+    ['process.env', 'const k = process.env.ANTHROPIC_API_KEY;', /process/],
     ['eval', "eval('1');", /eval/],
     ['Function ctor', "new Function('return 1')();", /Function/],
     ['dynamic import', "const m = await import('node:fs');", /dynamic import/],
-    ['globalThis', "const p = globalThis.process;", /globalThis/],
+    ['globalThis', 'const p = globalThis.process;', /globalThis/],
   ];
   for (const [name, line, re] of bad) {
     it('rejects ' + name, async () => {
@@ -59,19 +65,35 @@ describe('validateSpec security restrictions', () => {
     });
   }
   it('allows @playwright/test imports and property names like page.process', async () => {
-    const r = await validateSpec(GOOD_SPEC.replace("import { test, expect } from './_support';", "import { test, expect } from './_support';\nimport type { Page } from '@playwright/test';\nconst o = { process: 1, eval: 2 };"));
+    const r = await validateSpec(
+      GOOD_SPEC.replace(
+        "import { test, expect } from './_support';",
+        "import { test, expect } from './_support';\nimport type { Page } from '@playwright/test';\nconst o = { process: 1, eval: 2 };",
+      ),
+    );
     expect(r.errors).toEqual([]);
   });
 });
 
 describe('assertion guards', () => {
-  it('counts expect calls', () => { expect(countAssertions(GOOD_SPEC)).toBe(2); expect(countAssertions('// expect(x)\nconst a = 1;')).toBe(0); });
+  it('counts expect calls', () => {
+    expect(countAssertions(GOOD_SPEC)).toBe(2);
+    expect(countAssertions('// expect(x)\nconst a = 1;')).toBe(0);
+  });
   it('detects weakening', () => {
     expect(weakensAssertions(GOOD_SPEC, GOOD_SPEC)).toBeNull();
-    expect(weakensAssertions(GOOD_SPEC, GOOD_SPEC.replace(/\s*await expect\(page\)\.toHaveTitle.*\n/, '\n'))).toMatch(/fewer/i);
+    expect(weakensAssertions(GOOD_SPEC, GOOD_SPEC.replace(/\s*await expect\(page\)\.toHaveTitle.*\n/, '\n'))).toMatch(
+      /fewer/i,
+    );
     expect(weakensAssertions(GOOD_SPEC, GOOD_SPEC + '\nexpect(true).toBe(true);')).toMatch(/tautolog/i);
     expect(weakensAssertions(GOOD_SPEC, GOOD_SPEC.replace("test('home", "test.fixme('home"))).toMatch(/skip|fixme/i);
-    expect(weakensAssertions(GOOD_SPEC, GOOD_SPEC + "\nexpect(page.getByText('x')).toBeVisible({ timeout: 0 });")).toBeNull();
+    expect(
+      weakensAssertions(GOOD_SPEC, GOOD_SPEC + "\nexpect(page.getByText('x')).toBeVisible({ timeout: 0 });"),
+    ).toBeNull();
   });
-  it('allows adding assertions', () => { expect(weakensAssertions(GOOD_SPEC, GOOD_SPEC.replace('});\n});', "});\n  await expect(page).toHaveURL(/x/);\n});"))).toBeNull(); });
+  it('allows adding assertions', () => {
+    expect(
+      weakensAssertions(GOOD_SPEC, GOOD_SPEC.replace('});\n});', '});\n  await expect(page).toHaveURL(/x/);\n});')),
+    ).toBeNull();
+  });
 });

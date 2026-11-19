@@ -4,7 +4,14 @@ import { listModels, resolveModelId, supportsForcedToolChoice, PROVIDERS } from 
 describe('model ids (SPEC-002)', () => {
   it('AC-5: bedrock maps bare ids and passes prefixed ones through', () => {
     expect(resolveModelId('bedrock', 'claude-sonnet-5-5')).toBe('global.anthropic.claude-sonnet-5-5');
-    for (const id of ['anthropic.x', 'us.anthropic.x', 'eu.anthropic.x', 'apac.anthropic.x', 'global.anthropic.x', 'arn:aws:bedrock:us-east-1:1:inference-profile/x']) {
+    for (const id of [
+      'anthropic.x',
+      'us.anthropic.x',
+      'eu.anthropic.x',
+      'apac.anthropic.x',
+      'global.anthropic.x',
+      'arn:aws:bedrock:us-east-1:1:inference-profile/x',
+    ]) {
       expect(resolveModelId('bedrock', id)).toBe(id);
     }
   });
@@ -27,7 +34,14 @@ describe('model ids (SPEC-002)', () => {
   });
 
   it('AC-13 helper: forced tool choice support by model (bare or bedrock id)', () => {
-    for (const m of ['claude-sonnet-5-5', 'anthropic.claude-sonnet-5-5', 'global.anthropic.claude-sonnet-5-5', 'us.anthropic.claude-opus-5-5', 'claude-fable-5-1', 'claude-mythos-5-1']) {
+    for (const m of [
+      'claude-sonnet-5-5',
+      'anthropic.claude-sonnet-5-5',
+      'global.anthropic.claude-sonnet-5-5',
+      'us.anthropic.claude-opus-5-5',
+      'claude-fable-5-1',
+      'claude-mythos-5-1',
+    ]) {
       expect(supportsForcedToolChoice(m)).toBe(false);
     }
     for (const m of ['claude-haiku-4-5', 'claude-opus-4-8', 'claude-sonnet-5', 'claude-opus-5', 'm']) {

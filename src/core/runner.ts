@@ -38,7 +38,8 @@ export interface RunOptions {
   meta?: Pick<RunRecord, 'shard' | 'filters'>;
 }
 
-const ENV_ALLOW = /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TEMP|TMP|LANG|LANGUAGE|TZ|SystemRoot|SYSTEMROOT|COMSPEC|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|XDG_[A-Z_]+|LC_[A-Z_]+|PLAYWRIGHT_[A-Z_]+|DISPLAY)$/;
+const ENV_ALLOW =
+  /^(PATH|HOME|USER|LOGNAME|SHELL|TMPDIR|TEMP|TMP|LANG|LANGUAGE|TZ|SystemRoot|SYSTEMROOT|COMSPEC|PATHEXT|USERPROFILE|APPDATA|LOCALAPPDATA|XDG_[A-Z_]+|LC_[A-Z_]+|PLAYWRIGHT_[A-Z_]+|DISPLAY)$/;
 
 /**
  * Minimal environment for the test subprocess. Generated specs are LLM output derived from untrusted
@@ -54,11 +55,31 @@ export function buildRunnerEnv(parent: NodeJS.ProcessEnv, extra: Record<string, 
 const ANSI = /\u001b\[[0-9;]*m/g;
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-interface PwResult { status: string; duration: number; error?: { message?: string }; errors?: { message?: string }[]; attachments?: { name: string; path?: string }[] }
-interface PwTest { projectName?: string; status?: string; results: PwResult[] }
-interface PwSpec { file: string; tests: PwTest[] }
-interface PwSuite { file?: string; specs?: PwSpec[]; suites?: PwSuite[] }
-interface PwReport { suites?: PwSuite[]; errors?: { message?: string }[] }
+interface PwResult {
+  status: string;
+  duration: number;
+  error?: { message?: string };
+  errors?: { message?: string }[];
+  attachments?: { name: string; path?: string }[];
+}
+interface PwTest {
+  projectName?: string;
+  status?: string;
+  results: PwResult[];
+}
+interface PwSpec {
+  file: string;
+  tests: PwTest[];
+}
+interface PwSuite {
+  file?: string;
+  specs?: PwSpec[];
+  suites?: PwSuite[];
+}
+interface PwReport {
+  suites?: PwSuite[];
+  errors?: { message?: string }[];
+}
 
 function* specs(s: PwSuite): Generator<PwSpec> {
   for (const sp of s.specs ?? []) yield sp;
@@ -66,7 +87,13 @@ function* specs(s: PwSuite): Generator<PwSpec> {
 }
 
 function listPngs(dir: string): string[] {
-  return fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith('.png')).sort().map((f) => path.join(dir, f)) : [];
+  return fs.existsSync(dir)
+    ? fs
+        .readdirSync(dir)
+        .filter((f) => f.endsWith('.png'))
+        .sort()
+        .map((f) => path.join(dir, f))
+    : [];
 }
 
 /** Run generated tests through the real Playwright Test runner and collect structured results. */
@@ -93,7 +120,12 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   // Traces record request headers: with env headers (secrets) they are off, like logged-in runs (SPEC-009).
   const headerValues = Object.values(opts.env?.headers ?? {});
   const trace = artifactPolicy('trace', opts.trace ?? 'retain-on-failure', auth || headerValues.length > 0);
-  if (!auth && headerValues.length && opts.trace !== 'off') opts.onProgress?.({ type: 'info', stage: 'run', message: `Tracing is off: environment "${opts.env!.name}" sends custom headers, which traces would record` });
+  if (!auth && headerValues.length && opts.trace !== 'off')
+    opts.onProgress?.({
+      type: 'info',
+      stage: 'run',
+      message: `Tracing is off: environment "${opts.env!.name}" sends custom headers, which traces would record`,
+    });
   // The JSON report embeds the resolved config (incl. extraHTTPHeaders): scrub header values from everything we persist.
   // JSON is scrubbed value by value (never the raw text), so a short header value like `true` cannot corrupt it.
   const headerRedactor = new Redactor(headerValues.map((value) => ({ value, placeholder: '[env header]' })));
@@ -101,11 +133,19 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   const scrubJson = (raw: string): string => {
     const redacted = store.redact(raw);
     if (!headerRedactor.size) return redacted;
-    try { return JSON.stringify(headerRedactor.redactDeep(JSON.parse(redacted)), null, 2); } catch { return headerRedactor.redact(redacted); }
+    try {
+      return JSON.stringify(headerRedactor.redactDeep(JSON.parse(redacted)), null, 2);
+    } catch {
+      return headerRedactor.redact(redacted);
+    }
   };
   const video = artifactPolicy('video', opts.video ?? 'off', auth);
   if (auth && ((opts.trace && opts.trace !== 'off') || (opts.video && opts.video !== 'off'))) {
-    opts.onProgress?.({ type: 'info', stage: 'run', message: 'Trace and video recording are off for logged-in runs (they capture typed values and cookies)' });
+    opts.onProgress?.({
+      type: 'info',
+      stage: 'run',
+      message: 'Trace and video recording are off for logged-in runs (they capture typed values and cookies)',
+    });
   }
   const pwConfig = {
     testDir: store.testsDir(opts.site),
@@ -118,14 +158,28 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
     expect: { timeout: Math.round(opts.testTimeoutMs / 3) },
     workers: opts.workers ?? 2,
     reporter: [['json', { outputFile: jsonFile }]],
-    use: { baseURL: opts.baseUrl, headless: opts.headless, trace, video, actionTimeout: Math.round(opts.testTimeoutMs / 3), navigationTimeout: Math.round(opts.testTimeoutMs / 2) },
+    use: {
+      baseURL: opts.baseUrl,
+      headless: opts.headless,
+      trace,
+      video,
+      actionTimeout: Math.round(opts.testTimeoutMs / 3),
+      navigationTimeout: Math.round(opts.testTimeoutMs / 2),
+    },
   };
   // Header values (SPEC-012 FR-10) come from the environment of the test process, so they never land in this file.
-  fs.writeFileSync(configFile, `const config = ${JSON.stringify(pwConfig, null, 2)};\nconfig.use.extraHTTPHeaders = JSON.parse(process.env.AGENTIC_E2E_HTTP_HEADERS || '{}');\nexport default config;\n`);
+  fs.writeFileSync(
+    configFile,
+    `const config = ${JSON.stringify(pwConfig, null, 2)};\nconfig.use.extraHTTPHeaders = JSON.parse(process.env.AGENTIC_E2E_HTTP_HEADERS || '{}');\nexport default config;\n`,
+  );
 
   const cli = createRequire(path.join(rootDir, 'package.json')).resolve('@playwright/test/cli');
   const filters = ids.map((id) => `/${esc(id)}\\.spec\\.ts$`);
-  opts.onProgress?.({ type: 'info', stage: 'run', message: `Running ${ids.length} test(s) on ${targets.map((t) => t.name).join(', ')}${opts.env ? ` against ${opts.env.name}` : ''} (screenshots: ${opts.screenshots}, workers: ${pwConfig.workers}, retries: ${retries})` });
+  opts.onProgress?.({
+    type: 'info',
+    stage: 'run',
+    message: `Running ${ids.length} test(s) on ${targets.map((t) => t.name).join(', ')}${opts.env ? ` against ${opts.env.name}` : ''} (screenshots: ${opts.screenshots}, workers: ${pwConfig.workers}, retries: ${retries})`,
+  });
 
   const output = await new Promise<string>((resolve, reject) => {
     const child = spawn(process.execPath, [cli, 'test', '-c', configFile, ...filters], {
@@ -139,8 +193,12 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
         FORCE_COLOR: '0',
         CI: '1',
         ...(perProject ? { AGENTIC_E2E_PER_PROJECT: '1' } : {}),
-        ...(opts.journeyTimeouts && Object.keys(opts.journeyTimeouts).length ? { AGENTIC_E2E_TIMEOUTS: JSON.stringify(opts.journeyTimeouts) } : {}),
-        ...(opts.env && Object.keys(opts.env.headers).length ? { AGENTIC_E2E_HTTP_HEADERS: JSON.stringify(opts.env.headers) } : {}),
+        ...(opts.journeyTimeouts && Object.keys(opts.journeyTimeouts).length
+          ? { AGENTIC_E2E_TIMEOUTS: JSON.stringify(opts.journeyTimeouts) }
+          : {}),
+        ...(opts.env && Object.keys(opts.env.headers).length
+          ? { AGENTIC_E2E_HTTP_HEADERS: JSON.stringify(opts.env.headers) }
+          : {}),
         ...(opts.auth?.env ?? {}),
       }),
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -150,9 +208,15 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
     child.stderr.on('data', (d) => (buf += d));
     const perTest = ids.reduce((sum, id) => sum + (opts.journeyTimeouts?.[id] ?? opts.testTimeoutMs), 0);
     const budget = perTest * projects.length * (retries + 1) + 120_000;
-    const timer = setTimeout(() => child.kill('SIGKILL'), opts.globalTimeoutMs ? Math.min(budget, opts.globalTimeoutMs + 60_000) : budget);
+    const timer = setTimeout(
+      () => child.kill('SIGKILL'),
+      opts.globalTimeoutMs ? Math.min(budget, opts.globalTimeoutMs + 60_000) : budget,
+    );
     child.on('error', reject);
-    child.on('close', () => { clearTimeout(timer); resolve(buf); });
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve(buf);
+    });
   });
   const redactedOutput = scrub(output);
   fs.writeFileSync(path.join(run.dir, 'output.log'), redactedOutput);
@@ -163,14 +227,21 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
       const raw = scrubJson(fs.readFileSync(jsonFile, 'utf8'));
       fs.writeFileSync(jsonFile, raw);
       report = JSON.parse(raw) as PwReport;
-    } catch { /* handled below */ }
+    } catch {
+      /* handled below */
+    }
   }
   const rel = (p: string) => path.relative(siteDir, p);
   const resultKey = (id: string, project: string) => `${id}\u0000${project}`;
   const byKey = new Map<string, TestResult>();
   const describe = (project: string) => {
     const t = meta[project]?.target;
-    return { project, browser: t?.browser ?? 'chromium', ...(t?.device ? { device: t.device } : {}), ...(opts.env ? { env: opts.env.name } : {}) };
+    return {
+      project,
+      browser: t?.browser ?? 'chromium',
+      ...(t?.device ? { device: t.device } : {}),
+      ...(opts.env ? { env: opts.env.name } : {}),
+    };
   };
   for (const suite of report.suites ?? []) {
     for (const sp of specs(suite)) {
@@ -181,7 +252,14 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
         const res = t.results.at(-1);
         if (!res) continue;
         const sub = perProject ? projectDir(project) : '';
-        const status = res.status === 'passed' ? 'passed' : res.status === 'skipped' ? 'skipped' : res.status === 'timedOut' ? 'timedOut' : 'failed';
+        const status =
+          res.status === 'passed'
+            ? 'passed'
+            : res.status === 'skipped'
+              ? 'skipped'
+              : res.status === 'timedOut'
+                ? 'timedOut'
+                : 'failed';
         const err = (res.error?.message ?? res.errors?.[0]?.message ?? '').replace(ANSI, '');
         const trace = res.attachments?.find((a) => a.name === 'trace' && a.path)?.path;
         const videoFile = res.attachments?.find((a) => a.name === 'video' && a.path)?.path;
@@ -193,10 +271,15 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
             fs.writeFileSync(fj, rawFailure);
             const f = JSON.parse(rawFailure) as FailureSnapshot;
             failure = { ...f, screenshot: f.screenshot ? rel(f.screenshot) : undefined };
-          } catch { /* unreadable dump: report the failure without a snapshot */ }
+          } catch {
+            /* unreadable dump: report the failure without a snapshot */
+          }
         }
         byKey.set(resultKey(id, project), {
-          journeyId: id, file: `tests/${id}.spec.ts`, status, durationMs: res.duration,
+          journeyId: id,
+          file: `tests/${id}.spec.ts`,
+          status,
+          durationMs: res.duration,
           error: status === 'passed' ? undefined : err || undefined,
           tracePath: trace ? rel(trace) : undefined,
           ...(videoFile && fs.existsSync(videoFile) ? { videoPath: rel(videoFile) } : {}),
@@ -214,25 +297,49 @@ export async function runTests(store: Store, opts: RunOptions): Promise<RunRecor
   for (const id of ids) {
     for (const project of projectsFor(id)) {
       const found = byKey.get(resultKey(id, project));
-      if (found) { results.push(found); continue; }
+      if (found) {
+        results.push(found);
+        continue;
+      }
       const mine = topErrors.filter((m) => m.includes(`${id}.spec.ts`));
-      const error = (mine.length ? mine : topErrors).join('\n') || redactedOutput.replace(ANSI, '').slice(-2000) || 'Test did not produce a result';
-      results.push({ journeyId: id, file: `tests/${id}.spec.ts`, status: 'failed', durationMs: 0, error, screenshots: [], ...describe(project) });
+      const error =
+        (mine.length ? mine : topErrors).join('\n') ||
+        redactedOutput.replace(ANSI, '').slice(-2000) ||
+        'Test did not produce a result';
+      results.push({
+        journeyId: id,
+        file: `tests/${id}.spec.ts`,
+        status: 'failed',
+        durationMs: 0,
+        error,
+        screenshots: [],
+        ...describe(project),
+      });
     }
   }
 
   const record: RunRecord = {
-    id: run.id, kind: opts.kind ?? 'run', startedAt, finishedAt: new Date().toISOString(),
-    screenshots: opts.screenshots, fullPage: opts.fullPage, results,
+    id: run.id,
+    kind: opts.kind ?? 'run',
+    startedAt,
+    finishedAt: new Date().toISOString(),
+    screenshots: opts.screenshots,
+    fullPage: opts.fullPage,
+    results,
     ...(opts.env ? { env: opts.env.name } : {}),
     baseUrl: opts.baseUrl,
     targets: targets.map((t) => ({ name: t.name, browser: t.browser, ...(t.device ? { device: t.device } : {}) })),
-    workers: pwConfig.workers, retries,
+    workers: pwConfig.workers,
+    retries,
     ...(opts.meta?.shard ? { shard: opts.meta.shard } : {}),
     ...(opts.meta?.filters ? { filters: opts.meta.filters } : {}),
   };
   store.saveRun(opts.site, record);
   const passed = record.results.filter((r) => r.status === 'passed').length;
-  opts.onProgress?.({ type: 'info', stage: 'run', message: `Run ${run.id}: ${passed}/${record.results.length} passed` });
+  opts.onProgress?.({
+    type: 'info',
+    stage: 'run',
+    message: `Run ${run.id}: ${passed}/${record.results.length} passed`,
+  });
   return record;
 }

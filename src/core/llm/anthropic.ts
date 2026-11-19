@@ -5,7 +5,10 @@ import { LLMOutputError } from './types.js';
 import { resolveModelId, supportsForcedToolChoice, type ProviderId } from './models.js';
 
 export interface AnthropicOptions {
-  apiKey?: string; model: string; maxTokens?: number; client?: Pick<Anthropic, 'messages'>;
+  apiKey?: string;
+  model: string;
+  maxTokens?: number;
+  client?: Pick<Anthropic, 'messages'>;
   /** Which backend `client` talks to; decides how `model` is normalised. Default 'anthropic'. */
   provider?: ProviderId;
   /** SPEC-013 FR-20: explicit `cache_control` breakpoint on the system prompt (default off here; config default on). */
@@ -41,25 +44,47 @@ export class AnthropicProvider implements DetailedLLMProvider {
   async structuredDetailed<T>(req: StructuredRequest<T>, callOpts: LLMCallOptions = {}): Promise<LLMResult<T>> {
     const { $schema: _omit, ...inputSchema } = z.toJSONSchema(req.schema) as Record<string, unknown>;
     const content: Anthropic.ContentBlockParam[] = [
-      ...(req.images ?? []).map((i): Anthropic.ContentBlockParam => ({ type: 'image', source: { type: 'base64', media_type: i.mediaType, data: i.data } })),
+      ...(req.images ?? []).map((i): Anthropic.ContentBlockParam => ({
+        type: 'image',
+        source: { type: 'base64', media_type: i.mediaType, data: i.data },
+      })),
       { type: 'text', text: req.prompt },
     ];
     const forced = supportsForcedToolChoice(this.model);
-    const systemText = forced ? req.system : `${req.system}\n\nYou must respond by calling the \`${req.name}\` tool exactly once, with no other output.`;
+    const systemText = forced
+      ? req.system
+      : `${req.system}\n\nYou must respond by calling the \`${req.name}\` tool exactly once, with no other output.`;
     // An explicit breakpoint (not top-level automatic caching, which the legacy Bedrock runtime rejects on older models).
-    const system: string | Anthropic.TextBlockParam[] = this.opts.promptCaching ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }] : systemText;
-    const res = await this.client.messages.create({
-      model: this.model,
-      max_tokens: this.opts.maxTokens ?? 8000,
-      system,
-      messages: [{ role: 'user', content }],
-      tools: [{ name: req.name, description: req.description, input_schema: inputSchema as Anthropic.Tool.InputSchema }],
-      tool_choice: forced ? { type: 'tool', name: req.name } : { type: 'auto' },
-    }, { maxRetries: 0, ...(callOpts.signal ? { signal: callOpts.signal } : {}), ...(this.opts.timeoutMs ? { timeout: this.opts.timeoutMs } : {}) });
+    const system: string | Anthropic.TextBlockParam[] = this.opts.promptCaching
+      ? [{ type: 'text', text: systemText, cache_control: { type: 'ephemeral' } }]
+      : systemText;
+    const res = await this.client.messages.create(
+      {
+        model: this.model,
+        max_tokens: this.opts.maxTokens ?? 8000,
+        system,
+        messages: [{ role: 'user', content }],
+        tools: [
+          { name: req.name, description: req.description, input_schema: inputSchema as Anthropic.Tool.InputSchema },
+        ],
+        tool_choice: forced ? { type: 'tool', name: req.name } : { type: 'auto' },
+      },
+      {
+        maxRetries: 0,
+        ...(callOpts.signal ? { signal: callOpts.signal } : {}),
+        ...(this.opts.timeoutMs ? { timeout: this.opts.timeoutMs } : {}),
+      },
+    );
     const u = res.usage;
-    const usage = { inputTokens: u?.input_tokens ?? 0, outputTokens: u?.output_tokens ?? 0, cacheReadTokens: u?.cache_read_input_tokens ?? 0, cacheWriteTokens: u?.cache_creation_input_tokens ?? 0 };
+    const usage = {
+      inputTokens: u?.input_tokens ?? 0,
+      outputTokens: u?.output_tokens ?? 0,
+      cacheReadTokens: u?.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: u?.cache_creation_input_tokens ?? 0,
+    };
     // SPEC-013: an invalid response is still paid for, so its usage travels with the error (budgets + reports count it).
-    const invalid = (message: string, raw?: unknown) => Object.assign(new LLMOutputError(message, raw), { usage, model: this.model });
+    const invalid = (message: string, raw?: unknown) =>
+      Object.assign(new LLMOutputError(message, raw), { usage, model: this.model });
     const block = res.content.find((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === req.name);
     if (!block) throw invalid(`Model did not call tool ${req.name} (stop_reason=${res.stop_reason})`);
     const parsed = req.schema.safeParse(block.input);

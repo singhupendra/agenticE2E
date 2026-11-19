@@ -2,8 +2,15 @@ import { Redactor } from '../redact.js';
 
 /** Env vars whose values are secrets and must never appear in a report, summary or notification (SPEC-011 FR-6). */
 export const SECRET_ENV_VARS = [
-  'ANTHROPIC_API_KEY', 'AWS_BEARER_TOKEN_BEDROCK', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_ACCESS_KEY_ID', 'GITHUB_TOKEN',
-  'AGENTIC_E2E_WEBHOOK_URL', 'AGENTIC_E2E_SLACK_WEBHOOK_URL', 'E2E_PASSWORD',
+  'ANTHROPIC_API_KEY',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_ACCESS_KEY_ID',
+  'GITHUB_TOKEN',
+  'AGENTIC_E2E_WEBHOOK_URL',
+  'AGENTIC_E2E_SLACK_WEBHOOK_URL',
+  'E2E_PASSWORD',
 ] as const;
 
 const PATTERNS: [RegExp, string][] = [
@@ -22,7 +29,11 @@ export function scrubSecrets(s: string): string {
 }
 
 export function envSecretRedactor(env: Record<string, string | undefined>): Redactor {
-  return new Redactor(SECRET_ENV_VARS.map((k) => env[k]).filter((v): v is string => !!v && v.length >= 6).map((value) => ({ value, placeholder: '[REDACTED]' })));
+  return new Redactor(
+    SECRET_ENV_VARS.map((k) => env[k])
+      .filter((v): v is string => !!v && v.length >= 6)
+      .map((value) => ({ value, placeholder: '[REDACTED]' })),
+  );
 }
 
 /** Deep-apply every redactor, then the pattern scrubber, to all strings of `v` (keys included). */
