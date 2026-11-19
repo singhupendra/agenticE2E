@@ -17,6 +17,11 @@ import { JobManager, parseJobRequest } from './jobs.js';
 import { createStorageBackend, type StorageBackend } from '../core/storage/index.js';
 import { Lifecycle, setLifecycle } from './lifecycle.js';
 import { registerSecurity, type AuthOptions } from './security.js';
+import { AUDIT_FILE, AuditLog, journeyStatusChanges, readAuditLog } from '../core/obs/audit.js';
+import { buildLogRedactor } from '../core/obs/secrets.js';
+import { listUsageReports } from '../core/obs/usage-store.js';
+import { OBS_SERVER_ONLY_KEYS } from '../core/obs/config.js';
+import { addTotals, emptyTotals } from '../core/llm/usage.js';
 
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
 const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain', '.webm': 'video/webm' };
@@ -32,9 +37,13 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   const app = Fastify({ logger: false, bodyLimit: server.bodyLimitBytes, trustProxy: server.trustProxy });
   const store = new Store(opts.config.dataDir);
   const storage = opts.storage ?? createStorageBackend({ kind: 'filesystem', root: opts.config.dataDir });
-  const jobs = new JobManager(opts.config, opts.llm);
+  const jobs = new JobManager(opts.config, opts.llm, storage);
   const lifecycle = new Lifecycle({ activeJobs: () => jobs.list().filter((j) => j.status === 'running').length });
   setLifecycle(app, lifecycle);
+  const auditFile = path.join(opts.config.dataDir, AUDIT_FILE);
+  const audit = new AuditLog({ file: auditFile, actor: 'web:unknown', enabled: opts.config.auditLog, redactor: buildLogRedactor([]) }); // SPEC-013 FR-23
+  /** SPEC-013 FR-25 + SPEC-014: who (token / principal name, never the token) and from where. */
+  const webActor = (req: { ip?: string; principal?: { name: string } | null }) => `web:${req.principal?.name ?? 'anonymous'}@${req.ip ?? 'unknown'}`;
 
   // This server runs generated tests and spends LLM credits. Defences:
   //  1. Host allowlist on every request (stops DNS rebinding: a rebound page has Host == Origin == attacker.com).
@@ -78,7 +87,9 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
     const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, server: _s, environments, ...pub } = opts.config;
-    return { ...pub, environments: publicEnvironments(environments) }; // SPEC-012: header names only, never values
+    // SPEC-013: server-only settings (budget, logging, retries) are not job options, so the UI must not echo them back.
+    const visible = Object.fromEntries(Object.entries(pub).filter(([k]) => !(OBS_SERVER_ONLY_KEYS as readonly string[]).includes(k)));
+    return { ...visible, environments: publicEnvironments(environments) }; // SPEC-012: header names only, never values
   });
   app.get<{ Querystring: { provider?: string } }>('/api/models', async (req, reply) => {
     const provider = req.query.provider ?? opts.config.provider;
@@ -125,12 +136,31 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     return listTestCases(store, meta.id);
   });
 
+  // SPEC-013 FR-13: LLM usage reports of a site (newest first) + their sum.
+  app.get<{ Params: { site: string } }>('/api/sites/:site/usage', async (req, reply) => {
+    const meta = siteOr404(req.params.site, reply);
+    if (!meta) return;
+    const reports = await listUsageReports(storage, meta.id); // SPEC-014 FR-30: through the StorageBackend
+    return { reports, totals: reports.reduce((t, r) => addTotals(t, r.totals), emptyTotals()) };
+  });
+
+  // SPEC-013 FR-25: audit entries (viewer+ via SPEC-014 GET rule). Entries are redacted when written; actors are names, not tokens.
+  app.get<{ Querystring: { site?: string; limit?: string } }>('/api/audit', async (req, reply) => {
+    const { site, limit } = req.query;
+    if (site !== undefined) { try { store.siteDir(site); } catch (e) { return reply.code(400).send({ error: (e as Error).message }); } }
+    const n = limit === undefined ? 200 : Number(limit);
+    if (!Number.isInteger(n) || n < 1 || n > 10_000) return reply.code(400).send({ error: 'limit must be an integer between 1 and 10000' });
+    return { entries: readAuditLog(auditFile, { site, limit: n }) };
+  });
+
   app.put<{ Params: { site: string }; Body: unknown }>('/api/sites/:site/journeys', async (req, reply) => {
     const meta = siteOr404(req.params.site, reply);
     if (!meta) return;
     try {
       const journeys = parseJourneys(req.body);
+      const changes = journeyStatusChanges(store.loadJourneys(meta.id) ?? [], journeys);
       store.saveJourneys(meta.id, journeys);
+      if (changes.length) audit.append('journeys.status_changed', { site: meta.id, actor: webActor(req), details: { changes } });
       return journeys;
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
@@ -193,7 +223,7 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     // Only meaningful (and only checked) when the job will actually use Bedrock.
     if (profile && (jr.options?.provider ?? opts.config.provider) === 'bedrock' && !listAwsProfiles(opts.awsEnv ?? process.env).includes(profile)) return reply.code(400).send({ error: `Unknown AWS profile "${profile}"` });
     try {
-      const job = jobs.start(jr);
+      const job = jobs.start(jr, { actor: webActor(req) });
       return reply.code(202).send({ jobId: job.id });
     } catch (e) {
       if (e instanceof CredentialsError) console.error(`[agentic-e2e] POST /api/jobs: ${e.message}`);

@@ -6,6 +6,9 @@ import { DEFAULT_CREDENTIALS_FILE, loadCredentials, publicError } from '../core/
 import { createContext, discover, generate, healSelected, run, runAll } from '../core/pipeline.js';
 import type { LLMProvider } from '../core/llm/types.js';
 import { normalizeSite } from '../core/storage.js';
+import { OBS_SERVER_ONLY_KEYS } from '../core/obs/config.js';
+import type { StorageBackend } from '../core/storage/backend.js';
+import { formatUsageSummary, type UsageTotals } from '../core/llm/usage.js';
 import type { ProgressEvent } from '../core/types.js';
 
 export const ACTIONS = ['discover', 'generate', 'run', 'heal', 'all'] as const;
@@ -18,11 +21,14 @@ export interface JobRequest { action: Action; url: string; options?: JobOptions;
 export interface Job {
   id: string; action: Action; url: string; site: string; status: 'running' | 'done' | 'error'; startedAt: string; finishedAt?: string;
   events: ProgressEvent[]; result?: unknown; error?: string;
+  /** SPEC-013: LLM usage totals of the job (once finished) */
+  usage?: UsageTotals;
 }
 
 /** Options a web client may override per job. dataDir/model-provider internals are deliberately excluded. */
 // SPEC-012: `environments` (header values may be secrets) is server-only; clients pick one by name with `env`.
-const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true, environments: true, server: true }).partial()
+// SPEC-013: logging, budget and LLM retry settings are server-only too.
+const optionsSchema = configSchema.omit({ dataDir: true, maxTokens: true, awsRegion: true, awsProfile: true, credentialsFile: true, environments: true, server: true, ...Object.fromEntries(OBS_SERVER_ONLY_KEYS.map((k) => [k, true as const])) as Record<(typeof OBS_SERVER_ONLY_KEYS)[number], true> }).partial()
   .extend({ awsProfile: configSchema.shape.awsProfile.unwrap().nullable().optional() }).strict();
 
 /** Effective config for a job: server config overlaid with the client's options. */
@@ -58,7 +64,7 @@ export function parseJobRequest(body: unknown): JobRequest {
 export class JobManager {
   private jobs = new Map<string, Job>();
   private listeners = new Map<string, Set<(e: ProgressEvent) => void>>();
-  constructor(private base: Config, private llm?: LLMProvider) {}
+  constructor(private base: Config, private llm?: LLMProvider, private storage?: StorageBackend) {}
 
   get(id: string) { return this.jobs.get(id); }
   list() { return [...this.jobs.values()].map(({ events: _e, ...j }) => j).reverse(); }
@@ -76,7 +82,7 @@ export class JobManager {
     this.listeners.get(job.id)?.forEach((fn) => fn(e));
   }
 
-  start(req: JobRequest): Job {
+  start(req: JobRequest, meta: { actor?: string } = {}): Job {
     const site = normalizeSite(req.url).id;
     const busy = this.running(site);
     if (busy) throw Object.assign(new Error(`A job (${busy.id}) is already running for ${site}`), { statusCode: 409 });
@@ -90,15 +96,21 @@ export class JobManager {
     let job: Job | undefined;
     const early: ProgressEvent[] = [];
     let ctx: ReturnType<typeof createContext>;
+    const id = randomUUID(); // SPEC-013: the job id is the run's correlation id
     try {
-      ctx = createContext({ config, llm: this.llm, onProgress: (e) => (job ? this.emit(job, e) : early.push(e)) });
+      ctx = createContext({ config, llm: this.llm, onProgress: (e) => (job ? this.emit(job, e) : early.push(e)), obs: { correlationId: id, actor: meta.actor ?? 'web:unknown', action: req.action, site, storage: this.storage } });
     } catch (e) {
       throw (e as { statusCode?: number }).statusCode ? e : Object.assign(e as Error, { statusCode: 400 });
     }
-    job = { id: randomUUID(), action: req.action, url: req.url, site, status: 'running', startedAt: new Date().toISOString(), events: [] };
+    job = { id, action: req.action, url: req.url, site, status: 'running', startedAt: new Date().toISOString(), events: [] };
     this.jobs.set(job.id, job);
     for (const e of early) this.emit(job, e);
     const j = job;
+    const finish = async (status: 'ok' | 'error') => { // SPEC-013 FR-13: usage report + summary event before the terminal event
+      const report = await ctx.obs.finish({ action: req.action, site, status, error: j.error });
+      j.usage = report?.totals ?? ctx.obs.usage.totals();
+      if (j.usage.calls) this.emit(j, { type: 'info', stage: 'llm', message: formatUsageSummary(j.usage), data: { usage: j.usage } });
+    };
     void (async () => {
       const job = j;
       try {
@@ -110,12 +122,15 @@ export class JobManager {
           case 'all': job.result = await runAll(ctx, req.url, { rediscover: req.rediscover, regenerate: req.regenerate }); break;
         }
         job.result = ctx.redactor.redactDeep(job.result);
+        await finish('ok');
         job.status = 'done';
         job.finishedAt = new Date().toISOString();
         this.emit(job, { type: 'done', message: `${req.action} finished`, data: job.result });
       } catch (e) {
         job.status = 'error';
         job.error = ctx.redact(publicError(e));
+        ctx.obs.log.error({ error: job.error }, 'job.failed');
+        await finish('error');
         job.finishedAt = new Date().toISOString();
         this.emit(job, { type: 'error', message: job.error });
       }

@@ -32,6 +32,7 @@ export function buildSiteReport(ctx: Context, url: string, o: { mode: ReportMode
     site: { id: meta.id, origin: site?.origin ?? meta.origin }, mode: o.mode, runs: o.runs, heals: o.heals ?? [],
     journeys: ctx.store.loadJourneys(meta.id) ?? [],
     flaky: detectFlaky(ctx.store.listRuns(meta.id), ctx.store.loadHeals(meta.id)),
+    llm: ctx.obs.usage.calls, // SPEC-013 FR-31
   });
   return redactReport(report, [ctx.redactor, envSecretRedactor(o.env ?? process.env)]);
 }

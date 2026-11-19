@@ -22,6 +22,12 @@ export interface HealJobPayload { journeyIds?: string[]; failedOnly?: boolean }
 export interface TestDetail { id: string; code: string; versions: { name: string; code: string }[] }
 export interface RunDetail { id: string; results: { journeyId: string; status: string; durationMs: number; error?: string; screenshots: string[]; tracePath?: string; failure?: { url: string; screenshot?: string } }[] }
 
+/** SPEC-013: LLM usage reports (see src/core/obs/usage-store.ts). */
+export interface UsageTotals { calls: number; failed: number; cached: number; retries: number; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number; costUsd: number; unpricedCalls: number; latencyMs: number }
+export interface UsageCall { n: number; name: string; model: string; inputTokens: number; outputTokens: number; latencyMs: number; costUsd?: number; retries: number; cached: boolean; ok: boolean; error?: string }
+export interface UsageReport { id: string; action: string; site: string; actor: string; startedAt: string; status: 'ok' | 'error'; error?: string; model: string; totals: UsageTotals; calls: UsageCall[] }
+export interface UsageListing { reports: UsageReport[]; totals: UsageTotals }
+
 async function j<T>(res: Response): Promise<T> {
   if (res.status === 401) notifyUnauthorized(); // SPEC-014: session expired/revoked → token screen
   const body = await res.json().catch(() => ({}));
@@ -41,6 +47,7 @@ export const api = {
   testCases: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}/test-cases`).then((r) => j<{ tests: TestCaseRow[] }>(r)),
   run: (id: string, runId: string) => fetch(`/api/sites/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}`).then((r) => j<RunDetail>(r)),
   saveJourneys: (id: string, journeys: Journey[]) => fetch(`/api/sites/${encodeURIComponent(id)}/journeys`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(journeys) }).then((r) => j<Journey[]>(r)),
+  usage: (id: string) => fetch(`/api/sites/${encodeURIComponent(id)}/usage`).then((r) => j<UsageListing>(r)),
   startJob: (body: unknown) => post('/api/jobs', body).then((r) => j<{ jobId: string }>(r)),
   fileUrl: (id: string, rel: string) => `/api/sites/${encodeURIComponent(id)}/files/${rel.split('/').map(encodeURIComponent).join('/')}`,
 };

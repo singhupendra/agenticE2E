@@ -17,6 +17,9 @@ export interface BedrockClientOptions { awsRegion: string; providerChainResolver
 export interface BedrockOptions {
   model: string;
   maxTokens?: number;
+  /** SPEC-013 */
+  promptCaching?: boolean;
+  timeoutMs?: number;
   /** Region precedence: this, then the selected profile's `region`, then AWS_REGION, then AWS_DEFAULT_REGION. */
   awsRegion?: string;
   /** Named profile (~/.aws/credentials, ~/.aws/config) that supplies the credentials. Unset = AWS default chain. */
@@ -51,5 +54,5 @@ export function createBedrockProvider(opts: BedrockOptions): AnthropicProvider {
   const fromProfile = opts.fromProfile ?? fromNodeProviderChain;
   // SPEC-005 FR-2: lazy, so nothing is loaded (or refreshed, for SSO) until a request needs credentials.
   const client = make(awsProfile ? { awsRegion, providerChainResolver: async () => fromProfile({ profile: awsProfile }) } : apiKey ? { awsRegion, apiKey } : { awsRegion });
-  return new AnthropicProvider({ provider: 'bedrock', model: opts.model, maxTokens: opts.maxTokens, client });
+  return new AnthropicProvider({ provider: 'bedrock', model: opts.model, maxTokens: opts.maxTokens, promptCaching: opts.promptCaching, timeoutMs: opts.timeoutMs, client });
 }

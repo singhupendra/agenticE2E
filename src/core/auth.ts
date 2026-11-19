@@ -4,7 +4,7 @@ import type { Config } from './config.js';
 import { CredentialsError, type CredentialStore, type LoginHints, type ResolvedUser } from './credentials.js';
 import { capture } from './discovery.js';
 import { loginFormSchema } from './llm/schemas.js';
-import type { LLMProvider } from './llm/types.js';
+import { LLMBudgetError, type LLMProvider } from './llm/types.js';
 import { pageToPrompt } from './planner.js';
 import type { Redactor } from './redact.js';
 import { normalizeSite, type Store } from './storage.js';
@@ -176,7 +176,7 @@ export async function ensureSession(deps: AuthDeps, url: string, opts: { user?: 
   try {
     await login(deps, url, user, file);
   } catch (e) {
-    if (e instanceof CredentialsError) throw e;
+    if (e instanceof CredentialsError || e instanceof LLMBudgetError) throw e;
     const reason = deps.redactor.redact((e as Error).message.split('\n')[0]);
     throw new Error(`Login failed for user "${user.name}" on ${meta.id}: ${reason}`);
   }

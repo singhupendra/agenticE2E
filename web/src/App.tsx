@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ModelInfo } from '../../src/core/llm/models';
 import type { HealRecord, Journey, ProgressEvent } from '../../src/core/types';
 import { api, streamJob, type AuthInfo, type HealJobPayload, type RunDetail, type Settings, type SiteDetail, type SiteSummary, type TestCaseRow, type TestDetail } from './api';
+import { Usage } from './Usage';
 
-type Tab = 'journeys' | 'tests' | 'code' | 'runs' | 'heals' | 'screenshots';
+type Tab = 'journeys' | 'tests' | 'code' | 'runs' | 'heals' | 'screenshots' | 'usage';
 const ACTIONS = ['discover', 'generate', 'run', 'heal', 'all'] as const;
 
 export function App() {
@@ -82,7 +83,7 @@ export function App() {
         {detail && site && (
           <section className="card">
             <div className="tabs">
-              {(['journeys', 'tests', 'code', 'runs', 'heals', 'screenshots'] as Tab[]).map((t) => <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
+              {(['journeys', 'tests', 'code', 'runs', 'heals', 'screenshots', 'usage'] as Tab[]).map((t) => <button key={t} className={t === tab ? 'on' : ''} onClick={() => setTab(t)}>{t}</button>)}
             </div>
             {tab === 'journeys' && <Journeys site={site} journeys={detail.journeys} onSaved={() => refreshDetail(site)} />}
             {tab === 'tests' && <Tests site={site} busy={busy || !settings} version={testsVersion} onHeal={(p) => start('heal', p)} />}
@@ -90,6 +91,7 @@ export function App() {
             {tab === 'runs' && <Runs site={site} detail={detail} />}
             {tab === 'heals' && <Heals heals={detail.heals} />}
             {tab === 'screenshots' && <Gallery site={site} detail={detail} />}
+            {tab === 'usage' && <Usage site={site} version={testsVersion} />}
           </section>
         )}
       </main>
