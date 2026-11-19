@@ -46,7 +46,7 @@ rebase conflicts in a file that was only reformatted, keep your version of the f
 ## Coverage policy
 
 Thresholds live in `vitest.config.ts` and are set to the measured level minus a small margin (never below 70 % lines):
-lines 91, statements 90, branches 82, functions 88. Raise them when coverage goes up; lowering them needs a reason
+lines 93, statements 91, branches 85, functions 90. Raise them when coverage goes up; lowering them needs a reason
 in the PR description. `web/` is covered by typecheck + build (there is no browser test harness for the UI).
 
 ## Secrets — the rules (SPEC-009)
