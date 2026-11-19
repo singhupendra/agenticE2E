@@ -28,8 +28,21 @@ export interface ElementInfo {
   href?: string;
   type?: string;
 }
-export interface FormField { label: string; role: string; type?: string; name?: string; testId?: string; required?: boolean }
-export interface FormInfo { name?: string; action?: string; method?: string; fields: FormField[]; submit?: string }
+export interface FormField {
+  label: string;
+  role: string;
+  type?: string;
+  name?: string;
+  testId?: string;
+  required?: boolean;
+}
+export interface FormInfo {
+  name?: string;
+  action?: string;
+  method?: string;
+  fields: FormField[];
+  submit?: string;
+}
 export interface PageModel {
   url: string;
   path: string;
@@ -43,9 +56,21 @@ export interface PageModel {
   screenshot?: string;
 }
 
-export interface SiteMeta { id: string; origin: string; url: string; discoveredAt?: string; updatedAt?: string }
+export interface SiteMeta {
+  id: string;
+  origin: string;
+  url: string;
+  discoveredAt?: string;
+  updatedAt?: string;
+}
 
-export interface FailureSnapshot { url: string; title: string; ariaSnapshot: string; html: string; screenshot?: string }
+export interface FailureSnapshot {
+  url: string;
+  title: string;
+  ariaSnapshot: string;
+  html: string;
+  screenshot?: string;
+}
 export interface TestResult {
   journeyId: string;
   file: string;

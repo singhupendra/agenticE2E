@@ -1,0 +1,16 @@
+# SPEC-010 FR-4 — default gitleaks rules plus narrow, justified allowlists. Verified with gitleaks 8.30.1
+# (pinned in ci.yml): `gitleaks git --config .gitleaks.toml .` reports no leaks over the full history.
+title = "agenticE2E gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Committed example files with fake/placeholder values only (SPEC-009 FR-7, SPEC-014 .env.example)"
+paths = ['''^credentials\.example\.json$''', '''^\.env\.example$''']
+
+[[allowlists]]
+# Exact fake values only (no path allowlist: in gitleaks 8.30 a global `paths` entry skips the whole file, even with
+# condition = "AND", which would hide a real key committed under test/).
+description = "Fake secrets that redaction/leak tests feed in on purpose (SPEC-009/011/012)"
+regexes = ['''^AKIAABCDEFGHIJKLMNOP$''', '''^definitely-wrong-pw-1$''', '''^tok-9f8e7d6c5b$''']

@@ -1,7 +1,10 @@
 import { LLMTimeoutError } from './types.js';
 
 /** SPEC-013 FR-18/19: retries with exponential backoff + full jitter for transient LLM failures. */
-export interface BackoffPolicy { baseDelayMs: number; maxDelayMs: number }
+export interface BackoffPolicy {
+  baseDelayMs: number;
+  maxDelayMs: number;
+}
 export interface RetryOptions extends Partial<BackoffPolicy> {
   maxRetries: number;
   /** per attempt; the attempt's AbortSignal is aborted when it elapses */
@@ -10,10 +13,29 @@ export interface RetryOptions extends Partial<BackoffPolicy> {
   random?: () => number;
   onRetry?: (info: RetryInfo) => void;
 }
-export interface RetryInfo { attempt: number; delayMs: number; status?: number; error: string }
+export interface RetryInfo {
+  attempt: number;
+  delayMs: number;
+  status?: number;
+  error: string;
+}
 
-const RETRYABLE_NAMES = new Set(['APIConnectionError', 'APIConnectionTimeoutError', 'LLMTimeoutError', 'InternalServerError', 'RateLimitError']);
-const RETRYABLE_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT']);
+const RETRYABLE_NAMES = new Set([
+  'APIConnectionError',
+  'APIConnectionTimeoutError',
+  'LLMTimeoutError',
+  'InternalServerError',
+  'RateLimitError',
+]);
+const RETRYABLE_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EAI_AGAIN',
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+]);
 const MAX_RETRY_AFTER_MS = 60_000;
 
 const statusOf = (e: unknown): number | undefined => {
@@ -33,7 +55,10 @@ export function isRetryable(e: unknown): boolean {
 export function retryAfterMs(e: unknown): number | undefined {
   const h = (e as { headers?: unknown })?.headers;
   if (!h) return undefined;
-  const raw = typeof (h as Headers).get === 'function' ? (h as Headers).get('retry-after') : (h as Record<string, string | undefined>)['retry-after'];
+  const raw =
+    typeof (h as Headers).get === 'function'
+      ? (h as Headers).get('retry-after')
+      : (h as Record<string, string | undefined>)['retry-after'];
   const secs = raw === undefined || raw === null ? NaN : Number(raw);
   return Number.isFinite(secs) && secs >= 0 ? Math.min(secs * 1000, MAX_RETRY_AFTER_MS) : undefined;
 }
@@ -45,11 +70,18 @@ export function backoffDelay(attempt: number, policy: BackoffPolicy, random: () 
 
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-async function attemptWithTimeout<T>(fn: (signal: AbortSignal, attempt: number) => Promise<T>, attempt: number, timeoutMs: number): Promise<T> {
+async function attemptWithTimeout<T>(
+  fn: (signal: AbortSignal, attempt: number) => Promise<T>,
+  attempt: number,
+  timeoutMs: number,
+): Promise<T> {
   const ac = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => { ac.abort(); reject(new LLMTimeoutError(timeoutMs)); }, timeoutMs);
+    timer = setTimeout(() => {
+      ac.abort();
+      reject(new LLMTimeoutError(timeoutMs));
+    }, timeoutMs);
   });
   try {
     return await Promise.race([fn(ac.signal, attempt), timeout]);
@@ -59,7 +91,10 @@ async function attemptWithTimeout<T>(fn: (signal: AbortSignal, attempt: number) 
 }
 
 /** Runs `fn` until it succeeds, a non-retryable error occurs, or `maxRetries` is exhausted (the error gets `.retries`). */
-export async function withRetry<T>(fn: (signal: AbortSignal, attempt: number) => Promise<T>, opts: RetryOptions): Promise<{ value: T; retries: number }> {
+export async function withRetry<T>(
+  fn: (signal: AbortSignal, attempt: number) => Promise<T>,
+  opts: RetryOptions,
+): Promise<{ value: T; retries: number }> {
   const policy = { baseDelayMs: opts.baseDelayMs ?? 500, maxDelayMs: opts.maxDelayMs ?? 20_000 };
   const sleep = opts.sleep ?? defaultSleep;
   for (let attempt = 0; ; attempt++) {

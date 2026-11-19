@@ -4,7 +4,11 @@ import { applyTagEdits } from '../core/scale/tags.js';
 import type { Journey } from '../core/types.js';
 
 /** SPEC-012: CLI flags for execution at scale (kept out of index.ts so it stays small). */
-const num = (v: string) => { const n = Number(v); if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`); return n; };
+const num = (v: string) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) throw new Error(`Not a number: ${v}`);
+  return n;
+};
 const workers = (v: string) => (v.endsWith('%') ? v : num(v));
 
 export function addScaleOptions(cmd: Command): Command {
@@ -12,7 +16,11 @@ export function addScaleOptions(cmd: Command): Command {
     .option('--browser <names...>', 'browsers to run on: chromium | firefox | webkit (default: chromium)')
     .option('--device <names...>', "Playwright device presets to emulate, e.g. 'iPhone 15' 'Pixel 7'")
     .option('--workers <n>', 'parallel workers (number or percentage like 50%)', workers)
-    .option('--retries <n>', 'retry failing tests up to n times (run/heal/all: Playwright retries; ci: separate retry runs without the LLM, passing on retry = flaky)', num)
+    .option(
+      '--retries <n>',
+      'retry failing tests up to n times (run/heal/all: Playwright retries; ci: separate retry runs without the LLM, passing on retry = flaky)',
+      num,
+    )
     .option('--shard <i/n>', 'run only shard i of n (journey-level, deterministic)')
     .option('--env <name>', 'environment from config "environments" (base URL + headers; prod is read-only)')
     .option('--grep <pattern>', 'only tests whose id, name or a tag matches (substring or /regex/)')
@@ -50,6 +58,8 @@ export function addJourneyTagOptions(cmd: Command): Command {
 
 /** Returns the edited journeys, or null when no tag option was given. */
 export function applyJourneyTagOptions(journeys: Journey[], o: Record<string, unknown>): Journey[] | null {
-  const add = o.addTags as string[] | undefined, remove = o.removeTags as string[] | undefined, set = o.setTags as string[] | undefined;
+  const add = o.addTags as string[] | undefined,
+    remove = o.removeTags as string[] | undefined,
+    set = o.setTags as string[] | undefined;
   return add || remove || set ? applyTagEdits(journeys, { add, remove, set }) : null;
 }

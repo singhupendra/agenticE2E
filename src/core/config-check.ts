@@ -17,16 +17,21 @@ function levenshtein(a: string, b: string): number {
   const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)] as number[]);
   for (let j = 1; j <= b.length; j++) d[0][j] = j;
   for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
   }
   return d[a.length][b.length];
 }
 
 export function suggestKey(key: string, known: readonly string[]): string | undefined {
-  let best: string | undefined, bestD = Infinity;
+  let best: string | undefined,
+    bestD = Infinity;
   for (const k of known) {
     const dist = levenshtein(key.toLowerCase(), k.toLowerCase());
-    if (dist < bestD) { best = k; bestD = dist; }
+    if (dist < bestD) {
+      best = k;
+      bestD = dist;
+    }
   }
   return bestD <= 3 ? best : undefined;
 }
@@ -44,7 +49,8 @@ function shapeAt(schema: z.ZodType, p: readonly PropertyKey[]): Record<string, u
   type Node = { shape?: Record<string, unknown>; def?: { innerType?: unknown; in?: unknown } };
   const unwrap = (s: unknown): Node => {
     let x = s as Node;
-    for (let n = 0; n < 10 && x && !x.shape && (x.def?.innerType || x.def?.in); n++) x = (x.def.innerType ?? x.def.in) as Node;
+    for (let n = 0; n < 10 && x && !x.shape && (x.def?.innerType || x.def?.in); n++)
+      x = (x.def.innerType ?? x.def.in) as Node;
     return x;
   };
   let cur = unwrap(schema);
@@ -78,9 +84,15 @@ export function formatIssues(schema: z.ZodType, error: z.ZodError, input: unknow
 }
 
 /** Validate `input` against `schema`; returns readable issues (empty = valid) and the parsed data. */
-export function validateWith<S extends z.ZodType>(schema: S, input: unknown, source?: string): { issues: string[]; data?: z.infer<S> } {
+export function validateWith<S extends z.ZodType>(
+  schema: S,
+  input: unknown,
+  source?: string,
+): { issues: string[]; data?: z.infer<S> } {
   const parsed = schema.safeParse(input);
-  return parsed.success ? { issues: [], data: parsed.data } : { issues: formatIssues(schema, parsed.error, input, source) };
+  return parsed.success
+    ? { issues: [], data: parsed.data }
+    : { issues: formatIssues(schema, parsed.error, input, source) };
 }
 
 /** Validate a raw config object (e.g. file contents) against the strict config schema. */

@@ -13,5 +13,7 @@ export class MockLLM implements LLMProvider {
     if (!parsed.success) throw new LLMOutputError(`Invalid ${req.name} output (schema): ${parsed.error.message}`, raw);
     return parsed.data;
   }
-  callsFor(name: string) { return this.calls.filter((c) => c.name === name); }
+  callsFor(name: string) {
+    return this.calls.filter((c) => c.name === name);
+  }
 }

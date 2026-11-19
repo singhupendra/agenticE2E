@@ -7,10 +7,13 @@ export const obsConfigShape = {
   logLevel: z.enum(LOG_LEVELS).default('warn'),
   logFormat: z.enum(LOG_FORMATS).default('pretty'),
   /** Per-run limits; a run = one CLI command / web job. */
-  llmBudget: z.object({
-    maxCostPerRun: z.number().positive().optional(),
-    maxTokensPerRun: z.number().int().positive().optional(),
-  }).strict().optional(),
+  llmBudget: z
+    .object({
+      maxCostPerRun: z.number().positive().optional(),
+      maxTokensPerRun: z.number().int().positive().optional(),
+    })
+    .strict()
+    .optional(),
   llmMaxRetries: z.number().int().min(0).max(10).default(3),
   llmTimeoutMs: z.number().int().positive().default(300_000),
   promptCaching: z.boolean().default(true),
@@ -29,4 +32,13 @@ export const OBS_ENV_MAP = {
 } as const;
 
 /** Keys a web client must not override per job (the server's budget protects its credits; logging is the operator's). */
-export const OBS_SERVER_ONLY_KEYS = ['logLevel', 'logFormat', 'llmBudget', 'llmMaxRetries', 'llmTimeoutMs', 'promptCaching', 'auditLog', 'tracing'] as const;
+export const OBS_SERVER_ONLY_KEYS = [
+  'logLevel',
+  'logFormat',
+  'llmBudget',
+  'llmMaxRetries',
+  'llmTimeoutMs',
+  'promptCaching',
+  'auditLog',
+  'tracing',
+] as const;

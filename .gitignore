@@ -19,3 +19,6 @@ tokens*.json
 .env
 .env.*
 !.env.example
+
+# SPEC-010: coverage reports
+coverage/

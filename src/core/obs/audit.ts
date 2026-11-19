@@ -23,11 +23,16 @@ export interface AuditEntry {
 
 const GENESIS = '0'.repeat(64);
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
-const entryHash = (e: Omit<AuditEntry, 'hash'>) => sha256(e.prev + JSON.stringify([e.at, e.actor, e.action, e.site ?? null, e.correlationId ?? null, e.details]));
+const entryHash = (e: Omit<AuditEntry, 'hash'>) =>
+  sha256(e.prev + JSON.stringify([e.at, e.actor, e.action, e.site ?? null, e.correlationId ?? null, e.details]));
 
 /** `cli:<os user>`; never throws (os.userInfo can fail in odd containers). */
 export function cliActor(): string {
-  try { return `cli:${os.userInfo().username}`; } catch { return 'cli:unknown'; }
+  try {
+    return `cli:${os.userInfo().username}`;
+  } catch {
+    return 'cli:unknown';
+  }
 }
 
 function lastHash(file: string): string {
@@ -69,12 +74,20 @@ export class AuditLog {
     this.redactor = opts.redactor ?? Redactor.empty();
   }
 
-  append(action: AuditAction, o: { site?: string; details?: Record<string, unknown>; actor?: string } = {}): AuditEntry | null {
+  append(
+    action: AuditAction,
+    o: { site?: string; details?: Record<string, unknown>; actor?: string } = {},
+  ): AuditEntry | null {
     if (!this.enabled) return null;
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const base: Omit<AuditEntry, 'hash'> = this.redactor.redactDeep({
-      at: new Date().toISOString(), actor: o.actor ?? this.actor, action, ...(o.site ? { site: o.site } : {}),
-      ...(this.correlationId ? { correlationId: this.correlationId } : {}), details: o.details ?? {}, prev: lastHash(this.file),
+      at: new Date().toISOString(),
+      actor: o.actor ?? this.actor,
+      action,
+      ...(o.site ? { site: o.site } : {}),
+      ...(this.correlationId ? { correlationId: this.correlationId } : {}),
+      details: o.details ?? {},
+      prev: lastHash(this.file),
     });
     const entry: AuditEntry = { ...base, hash: entryHash(base) };
     fs.appendFileSync(this.file, JSON.stringify(entry) + '\n', { flag: 'a' });
@@ -84,7 +97,11 @@ export class AuditLog {
 
 function parseLines(file: string): AuditEntry[] {
   if (!fs.existsSync(file)) return [];
-  return fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l) as AuditEntry);
+  return fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim())
+    .map((l) => JSON.parse(l) as AuditEntry);
 }
 
 /** Entries oldest-first, optionally for one site; `limit` keeps the newest n. */
@@ -97,21 +114,38 @@ export function readAuditLog(file: string, o: { site?: string; limit?: number } 
 /** Recomputes the chain. `brokenAt` is the 1-based line of the first entry that does not verify. */
 export function verifyAuditLog(file: string): { ok: boolean; entries: number; brokenAt?: number; reason?: string } {
   if (!fs.existsSync(file)) return { ok: true, entries: 0 };
-  const lines = fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim());
+  const lines = fs
+    .readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim());
   let prev = GENESIS;
   for (let i = 0; i < lines.length; i++) {
     let e: AuditEntry;
-    try { e = JSON.parse(lines[i]) as AuditEntry; } catch { return { ok: false, entries: lines.length, brokenAt: i + 1, reason: 'not valid JSON' }; }
-    if (e.prev !== prev) return { ok: false, entries: lines.length, brokenAt: i + 1, reason: 'previous-hash mismatch (an entry was removed or reordered)' };
+    try {
+      e = JSON.parse(lines[i]) as AuditEntry;
+    } catch {
+      return { ok: false, entries: lines.length, brokenAt: i + 1, reason: 'not valid JSON' };
+    }
+    if (e.prev !== prev)
+      return {
+        ok: false,
+        entries: lines.length,
+        brokenAt: i + 1,
+        reason: 'previous-hash mismatch (an entry was removed or reordered)',
+      };
     const { hash, ...rest } = e;
-    if (entryHash(rest) !== hash) return { ok: false, entries: lines.length, brokenAt: i + 1, reason: 'hash mismatch (the entry was modified)' };
+    if (entryHash(rest) !== hash)
+      return { ok: false, entries: lines.length, brokenAt: i + 1, reason: 'hash mismatch (the entry was modified)' };
     prev = hash;
   }
   return { ok: true, entries: lines.length };
 }
 
 /** Status changes between two journey lists (`null` = journey absent on that side). */
-export function journeyStatusChanges(before: Journey[], after: Journey[]): { id: string; from: string | null; to: string | null }[] {
+export function journeyStatusChanges(
+  before: Journey[],
+  after: Journey[],
+): { id: string; from: string | null; to: string | null }[] {
   const b = new Map(before.map((j) => [j.id, j.status]));
   const a = new Map(after.map((j) => [j.id, j.status]));
   const out: { id: string; from: string | null; to: string | null }[] = [];

@@ -7,37 +7,94 @@ import type { RunRecord, TestResult, Journey } from '../src/core/types.js';
 const runCalls: string[][] = [];
 let failing: Set<string>;
 vi.mock('../src/core/runner.js', () => ({
-  runTests: async (store: { listTests: (s: string) => string[] }, o: { site: string; journeyIds?: string[]; kind?: RunRecord['kind'] }) => {
+  runTests: async (
+    store: { listTests: (s: string) => string[] },
+    o: { site: string; journeyIds?: string[]; kind?: RunRecord['kind'] },
+  ) => {
     const ids = o.journeyIds ?? store.listTests(o.site);
     runCalls.push(ids);
-    const results: TestResult[] = ids.map((id) => ({ journeyId: id, file: `${id}.spec.ts`, status: failing.has(id) && o.kind !== 'heal-rerun' ? 'failed' : 'passed', durationMs: 1, error: 'boom', screenshots: [] }));
-    return { id: 'r', kind: o.kind ?? 'run', startedAt: '', finishedAt: '', screenshots: 'off', fullPage: false, results } satisfies RunRecord;
+    const results: TestResult[] = ids.map((id) => ({
+      journeyId: id,
+      file: `${id}.spec.ts`,
+      status: failing.has(id) && o.kind !== 'heal-rerun' ? 'failed' : 'passed',
+      durationMs: 1,
+      error: 'boom',
+      screenshots: [],
+    }));
+    return {
+      id: 'r',
+      kind: o.kind ?? 'run',
+      startedAt: '',
+      finishedAt: '',
+      screenshots: 'off',
+      fullPage: false,
+      results,
+    } satisfies RunRecord;
   },
 }));
 let llmCalls = 0;
 vi.mock('../src/core/llm/index.js', () => ({
-  createLLMProvider: () => ({ structured: async () => { llmCalls++; return { verdict: 'app_bug', reason: 'real bug' }; } }),
+  createLLMProvider: () => ({
+    structured: async () => {
+      llmCalls++;
+      return { verdict: 'app_bug', reason: 'real bug' };
+    },
+  }),
 }));
 
 const { main } = await import('../src/cli/index.js');
 const { Store } = await import('../src/core/storage.js');
 const { FAILING_SPEC } = await import('./helpers/specs.js');
 
-const j = (id: string): Journey => ({ id, name: `Journey ${id}`, goal: 'g', priority: 'high', tags: [], steps: ['a'], status: 'selected' });
-const res = (journeyId: string, status: TestResult['status']): TestResult => ({ journeyId, file: `${journeyId}.spec.ts`, status, durationMs: 1, error: status === 'passed' ? undefined : 'boom', screenshots: [] });
+const j = (id: string): Journey => ({
+  id,
+  name: `Journey ${id}`,
+  goal: 'g',
+  priority: 'high',
+  tags: [],
+  steps: ['a'],
+  status: 'selected',
+});
+const res = (journeyId: string, status: TestResult['status']): TestResult => ({
+  journeyId,
+  file: `${journeyId}.spec.ts`,
+  status,
+  durationMs: 1,
+  error: status === 'passed' ? undefined : 'boom',
+  screenshots: [],
+});
 let dir: string, out: string[], err: string[];
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clih-'));
-  out = []; err = []; runCalls.length = 0; llmCalls = 0; failing = new Set();
-  vi.spyOn(console, 'log').mockImplementation((...a) => { out.push(a.join(' ')); });
-  vi.spyOn(console, 'error').mockImplementation((...a) => { err.push(a.join(' ')); });
+  out = [];
+  err = [];
+  runCalls.length = 0;
+  llmCalls = 0;
+  failing = new Set();
+  vi.spyOn(console, 'log').mockImplementation((...a) => {
+    out.push(a.join(' '));
+  });
+  vi.spyOn(console, 'error').mockImplementation((...a) => {
+    err.push(a.join(' '));
+  });
   const s = new Store(dir);
   s.saveSite({ id: 'example.com', origin: 'https://example.com', url: 'https://example.com' });
   s.saveJourneys('example.com', [j('a'), j('b'), j('c')]);
   for (const id of ['a', 'b', 'c']) s.saveTest('example.com', id, FAILING_SPEC);
-  s.saveRun('example.com', { id: '2026-01-01T00-00-00-000Z', kind: 'run', startedAt: '', finishedAt: '2026-01-01T00:00:05Z', screenshots: 'off', fullPage: false, results: [res('a', 'passed'), res('b', 'failed')] });
+  s.saveRun('example.com', {
+    id: '2026-01-01T00-00-00-000Z',
+    kind: 'run',
+    startedAt: '',
+    finishedAt: '2026-01-01T00:00:05Z',
+    screenshots: 'off',
+    fullPage: false,
+    results: [res('a', 'passed'), res('b', 'failed')],
+  });
 });
-afterEach(() => { vi.restoreAllMocks(); fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 const cli = (...args: string[]) => main(['node', 'agentic-e2e', ...args, '--data-dir', dir]);
 const U = 'https://example.com';
 
@@ -46,7 +103,11 @@ describe('heal CLI selection (SPEC-008)', () => {
     await cli('heal', U, 'a', 'b');
     await cli('heal', U, '--journey', 'a', 'b');
     await cli('heal', U, 'a', '--journey', 'a', 'b');
-    expect(runCalls).toEqual([['a', 'b'], ['a', 'b'], ['a', 'b']]);
+    expect(runCalls).toEqual([
+      ['a', 'b'],
+      ['a', 'b'],
+      ['a', 'b'],
+    ]);
   });
   it('AC-9: unknown id exits 1, lists valid ids, runs nothing', async () => {
     expect(await cli('heal', U, 'a', 'zzz')).toBe(1);
@@ -56,7 +117,15 @@ describe('heal CLI selection (SPEC-008)', () => {
     expect(llmCalls).toBe(0);
   });
   it('AC-10: --failed with nothing failing exits 0 with a message, no run, no LLM', async () => {
-    new Store(dir).saveRun('example.com', { id: '2026-01-02T00-00-00-000Z', kind: 'run', startedAt: '', finishedAt: '2026-01-02T00:00:05Z', screenshots: 'off', fullPage: false, results: [res('b', 'passed')] });
+    new Store(dir).saveRun('example.com', {
+      id: '2026-01-02T00-00-00-000Z',
+      kind: 'run',
+      startedAt: '',
+      finishedAt: '2026-01-02T00:00:05Z',
+      screenshots: 'off',
+      fullPage: false,
+      results: [res('b', 'passed')],
+    });
     expect(await cli('heal', U, '--failed')).toBe(0);
     expect(out.join('\n')).toMatch(/No failing tests to heal for example\.com/);
     expect(runCalls).toEqual([]);

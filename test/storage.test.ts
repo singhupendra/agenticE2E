@@ -5,11 +5,21 @@ import path from 'node:path';
 import { Store, normalizeSite } from '../src/core/storage.js';
 import type { Journey } from '../src/core/types.js';
 
-const j = (id: string): Journey => ({ id, name: id, goal: 'g', priority: 'high', tags: [], steps: ['a'], status: 'selected' });
+const j = (id: string): Journey => ({
+  id,
+  name: id,
+  goal: 'g',
+  priority: 'high',
+  tags: [],
+  steps: ['a'],
+  status: 'selected',
+});
 
 describe('storage', () => {
   let dir: string;
-  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'store-')); });
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'store-'));
+  });
 
   it('AC-5: normalizes sites', () => {
     expect(normalizeSite('https://WWW.Example.com:8443/a?b=1').id).toBe('www.example.com_8443');

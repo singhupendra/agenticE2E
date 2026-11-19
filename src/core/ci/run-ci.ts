@@ -14,7 +14,14 @@ export type CiExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
 
 /** An error with a known CI exit code. */
 export class CiError extends Error {
-  constructor(message: string, public readonly exitCode: CiExitCode, public readonly cause?: unknown) { super(message); this.name = 'CiError'; }
+  constructor(
+    message: string,
+    public readonly exitCode: CiExitCode,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'CiError';
+  }
 }
 
 export interface CiOptions {
@@ -27,12 +34,19 @@ export interface CiOptions {
   llm?: LLMProvider;
   cwd?: string;
 }
-export interface CiResult { exitCode: CiExitCode; report?: RunReport; files: string[]; error?: string; heals: HealRecord[] }
+export interface CiResult {
+  exitCode: CiExitCode;
+  report?: RunReport;
+  files: string[];
+  error?: string;
+  heals: HealRecord[];
+}
 
 const isFail = (r: TestResult) => r.status === 'failed' || r.status === 'timedOut';
 const HEAL_ABORTED = 'Healing aborted by error:';
 /** Errors from `run()` that are about configuration or the login rather than the infrastructure. */
-const CONFIG_RUN_ERROR = /Login failed|requires a logged-in user|No runnable tests|No tests to run|No stored test|Invalid (?:URL|site id|id)/;
+const CONFIG_RUN_ERROR =
+  /Login failed|requires a logged-in user|No runnable tests|No tests to run|No stored test|Invalid (?:URL|site id|id)/;
 
 export function classifyRunError(e: unknown): CiExitCode {
   if (e instanceof CiError) return e.exitCode;
@@ -44,8 +58,16 @@ export function classifyRunError(e: unknown): CiExitCode {
 async function preflight(o: CiOptions): Promise<Context> {
   const meta = normalizeSite(o.url);
   const ctx = createContext({ config: o.config, llm: o.llm, onProgress: o.onProgress, cwd: o.cwd });
-  if (!ctx.store.hasSite(meta.id)) throw new CiError(`Unknown site ${meta.id} in ${o.config.dataDir}. CI mode only runs stored tests; generate them first (agentic-e2e generate ${o.url}).`, EXIT_CODES.CONFIG_OR_AUTH);
-  if (!ctx.store.listTests(meta.id).length) throw new CiError(`No stored tests for ${meta.id}. CI mode never generates tests; run: agentic-e2e generate ${o.url}`, EXIT_CODES.CONFIG_OR_AUTH);
+  if (!ctx.store.hasSite(meta.id))
+    throw new CiError(
+      `Unknown site ${meta.id} in ${o.config.dataDir}. CI mode only runs stored tests; generate them first (agentic-e2e generate ${o.url}).`,
+      EXIT_CODES.CONFIG_OR_AUTH,
+    );
+  if (!ctx.store.listTests(meta.id).length)
+    throw new CiError(
+      `No stored tests for ${meta.id}. CI mode never generates tests; run: agentic-e2e generate ${o.url}`,
+      EXIT_CODES.CONFIG_OR_AUTH,
+    );
   const user = authUserFor(ctx, o.url);
   if (user) await ensureSession(ctx, o.url, { user: user.name });
   if (o.allowHeal && o.config.healAttempts > 0) ctx.getLLM();
@@ -61,13 +83,24 @@ export async function runCi(o: CiOptions): Promise<CiResult> {
   const progress = o.onProgress ?? (() => {});
   let ctx: Context | undefined;
   const fail = async (exitCode: CiExitCode, e: unknown): Promise<CiResult> => {
-    const message = ctx ? ctx.redact((e as Error)?.message ?? String(e)) : (e as Error)?.message ?? String(e);
+    const message = ctx ? ctx.redact((e as Error)?.message ?? String(e)) : ((e as Error)?.message ?? String(e));
     await ctx?.obs.finish({ action: 'ci', site: normalizeSite(o.url).id, status: 'error', error: message }); // SPEC-013 usage report
-    await publishError({ exitCode, error: e, env, notifyOn: o.config.notifyOn, redactors: ctx ? [ctx.redactor] : [], onWarn: (m) => progress({ type: 'warn', stage: 'report', message: m }) });
+    await publishError({
+      exitCode,
+      error: e,
+      env,
+      notifyOn: o.config.notifyOn,
+      redactors: ctx ? [ctx.redactor] : [],
+      onWarn: (m) => progress({ type: 'warn', stage: 'report', message: m }),
+    });
     return { exitCode, files: [], error: message, heals: [] };
   };
 
-  try { ctx = await preflight(o); } catch (e) { return fail(e instanceof CiError ? e.exitCode : EXIT_CODES.CONFIG_OR_AUTH, e); }
+  try {
+    ctx = await preflight(o);
+  } catch (e) {
+    return fail(e instanceof CiError ? e.exitCode : EXIT_CODES.CONFIG_OR_AUTH, e);
+  }
 
   const runs: RunRecord[] = [];
   let heals: HealRecord[] = [];
@@ -80,7 +113,11 @@ export async function runCi(o: CiOptions): Promise<CiResult> {
     const last = new Map(runs[0].results.map((r) => [key(r), r]));
     const failing = () => [...new Set([...last.values()].filter(isFail).map((r) => r.journeyId))];
     for (let i = 1; i <= o.config.retries && failing().length; i++) {
-      progress({ type: 'stage', stage: 'retry', message: `Retry ${i}/${o.config.retries}: re-running ${failing().length} failing test(s)` });
+      progress({
+        type: 'stage',
+        stage: 'retry',
+        message: `Retry ${i}/${o.config.retries}: re-running ${failing().length} failing test(s)`,
+      });
       const r = await run(ctx, o.url, { journeyIds: failing(), kind: 'retry', playwrightRetries: 0 });
       runs.push(r);
       for (const x of r.results) last.set(key(x), x);
@@ -90,7 +127,11 @@ export async function runCi(o: CiOptions): Promise<CiResult> {
       heals = await heal(ctx, o.url, { ...runs[0], results: [...last.values()].filter(isFail) }); // heal() heals each journey once
       infra = heals.some((h) => h.outcome === 'failed' && h.reason.startsWith(HEAL_ABORTED));
     } else if (still.length && !o.allowHeal) {
-      progress({ type: 'info', stage: 'ci', message: `${still.length} test(s) failing; not healing (CI mode never rewrites tests without --allow-heal)` });
+      progress({
+        type: 'info',
+        stage: 'ci',
+        message: `${still.length} test(s) failing; not healing (CI mode never rewrites tests without --allow-heal)`,
+      });
     }
   } catch (e) {
     if (!runs.length) return fail(classifyRunError(e), e);
@@ -101,7 +142,11 @@ export async function runCi(o: CiOptions): Promise<CiResult> {
   // Total: anything unexpected from here on (e.g. unreadable run history) is an infra error, never "test failures".
   try {
     const report = buildSiteReport(ctx, o.url, { mode: 'ci', runs, heals, env });
-    const exitCode: CiExitCode = infra ? EXIT_CODES.LLM_OR_INFRA : report.totals.failed ? EXIT_CODES.TEST_FAILURES : EXIT_CODES.PASS;
+    const exitCode: CiExitCode = infra
+      ? EXIT_CODES.LLM_OR_INFRA
+      : report.totals.failed
+        ? EXIT_CODES.TEST_FAILURES
+        : EXIT_CODES.PASS;
     const { files } = await publishReport(ctx, report, { exitCode, env });
     await ctx.obs.finish({ action: 'ci', site: normalizeSite(o.url).id, status: infra ? 'error' : 'ok' }); // SPEC-013 usage report
     return { exitCode, report, files, heals };

@@ -8,8 +8,28 @@ import { generateSpec, generateTests } from '../src/core/codegen.js';
 import type { Journey, PageModel } from '../src/core/types.js';
 import { GOOD_SPEC, TYPE_ERROR_SPEC } from './helpers/specs.js';
 
-const pages: PageModel[] = [{ url: 'http://x/', path: '/', title: 'Home', depth: 0, headings: [], ariaSnapshot: '', elements: [], forms: [], navLinks: [] }];
-const journey = (id: string, status: Journey['status'] = 'selected'): Journey => ({ id, name: id, goal: 'goal', priority: 'high', tags: [], steps: ['open', 'check'], status });
+const pages: PageModel[] = [
+  {
+    url: 'http://x/',
+    path: '/',
+    title: 'Home',
+    depth: 0,
+    headings: [],
+    ariaSnapshot: '',
+    elements: [],
+    forms: [],
+    navLinks: [],
+  },
+];
+const journey = (id: string, status: Journey['status'] = 'selected'): Journey => ({
+  id,
+  name: id,
+  goal: 'goal',
+  priority: 'high',
+  tags: [],
+  steps: ['open', 'check'],
+  status,
+});
 
 describe('generateSpec', () => {
   it('AC-18: retries with diagnostics until valid', async () => {
@@ -24,13 +44,17 @@ describe('generateSpec', () => {
 
   it('AC-19: gives up after retries', async () => {
     const llm = new MockLLM(() => ({ code: TYPE_ERROR_SPEC }));
-    await expect(generateSpec(llm, { journey: journey('j'), pages, baseUrl: 'http://x' }, { retries: 1 })).rejects.toThrow(/failed validation after 2 attempts/);
+    await expect(
+      generateSpec(llm, { journey: journey('j'), pages, baseUrl: 'http://x' }, { retries: 1 }),
+    ).rejects.toThrow(/failed validation after 2 attempts/);
     expect(llm.calls).toHaveLength(2);
   });
 
   it('strips markdown fences', async () => {
     const llm = new MockLLM(() => ({ code: '```ts\n' + GOOD_SPEC + '```' }));
-    expect((await generateSpec(llm, { journey: journey('j'), pages, baseUrl: 'http://x' }, { retries: 0 })).code.trim()).toBe(GOOD_SPEC.trim());
+    expect(
+      (await generateSpec(llm, { journey: journey('j'), pages, baseUrl: 'http://x' }, { retries: 0 })).code.trim(),
+    ).toBe(GOOD_SPEC.trim());
   });
 
   it('prompt mentions journey steps and locator guidance', async () => {
@@ -43,7 +67,9 @@ describe('generateSpec', () => {
 
 describe('generateTests', () => {
   let store: Store;
-  beforeEach(() => { store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'cg-'))); });
+  beforeEach(() => {
+    store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'cg-')));
+  });
   const base = { site: 'x.test', baseUrl: 'http://x.test', pages, retries: 1, requireApproval: false };
 
   it('AC-17: saves code and an original version', async () => {

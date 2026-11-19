@@ -1,0 +1,102 @@
+# SPEC-010 §3.5 — optional nightly replay of stored tests (`agentic-e2e run`) against configured sites.
+# DISABLED BY DEFAULT: the job is skipped unless the repository variable AGENTIC_E2E_NIGHTLY is 'true'.
+# Tests come from a committed data directory (AGENTIC_E2E_NIGHTLY_DATA_DIR, default e2e-data/) because data/ is
+# gitignored. Setup is documented in CONTRIBUTING.md ("Nightly runs").
+name: Nightly E2E
+
+on:
+  schedule:
+    - cron: '30 21 * * *' # 03:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    name: agentic-e2e run (configured sites)
+    if: ${{ vars.AGENTIC_E2E_NIGHTLY == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATA_DIR: ${{ vars.AGENTIC_E2E_NIGHTLY_DATA_DIR || 'e2e-data' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24' # must be one of the CI matrix versions (ci.yml)
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: No credentials / sessions tracked (incl. <data dir>/sites/*/auth)
+        run: pnpm check:secrets
+
+      - name: Stored tests present
+        run: |
+          if [ ! -d "$DATA_DIR/sites" ]; then
+            echo "::error::No stored tests in '$DATA_DIR/sites'. Generate them locally (agentic-e2e generate <url> --data-dir $DATA_DIR) and commit the directory, or set AGENTIC_E2E_NIGHTLY_DATA_DIR."
+            exit 1
+          fi
+
+      - name: Install Playwright browsers (any SPEC-012 --browser / --device target)
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+
+      - name: Materialise credentials file (outside the workspace, mode 600)
+        env:
+          CREDENTIALS_JSON: ${{ secrets.AGENTIC_E2E_CREDENTIALS_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CREDENTIALS_JSON:-}" ]; then echo "No credentials secret; --auth sites will fail to log in."; exit 0; fi
+          # GitHub masks the whole secret only; also mask every individual string value in it.
+          node -e 'const w=(v)=>typeof v==="string"?(v.length>=3&&console.log("::add-mask::"+v)):v&&typeof v==="object"&&Object.values(v).forEach(w);w(JSON.parse(process.env.CREDENTIALS_JSON))'
+          umask 077
+          file="$RUNNER_TEMP/agentic-e2e-credentials.json"
+          printf '%s' "$CREDENTIALS_JSON" > "$file"
+          chmod 600 "$file"
+          echo "AGENTIC_E2E_CREDENTIALS=$file" >> "$GITHUB_ENV"
+
+      - name: Run stored tests against configured sites
+        env:
+          SITES: ${{ vars.AGENTIC_E2E_NIGHTLY_SITES }}
+          # Only needed when an --auth site has no login hints (the LLM locates the login form; SPEC-009 FR-10).
+          AGENTIC_E2E_PROVIDER: ${{ vars.AGENTIC_E2E_PROVIDER }}
+          AGENTIC_E2E_MODEL: ${{ vars.AGENTIC_E2E_MODEL }}
+          AGENTICQA_BEDROCK_MODEL_ID: ${{ vars.AGENTICQA_BEDROCK_MODEL_ID }}
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+        run: |
+          set -uo pipefail
+          if [ -z "${SITES:-}" ]; then echo "::error::Set the repository variable AGENTIC_E2E_NIGHTLY_SITES (one URL per line)."; exit 1; fi
+          status=0
+          # Each line: <url> [extra `run` flags], e.g. "https://app.example.com --auth --user alice"
+          while IFS= read -r line || [ -n "$line" ]; do
+            line="${line%%#*}"
+            read -r -a args <<< "$line"
+            [ "${#args[@]}" -eq 0 ] && continue
+            echo "::group::agentic-e2e run ${args[0]}"
+            pnpm cli run "${args[@]}" --data-dir "$DATA_DIR" || status=1
+            echo "::endgroup::"
+          done <<< "$SITES"
+          exit "$status"
+
+      - name: Upload run results (never the stored sessions)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: nightly-e2e-results
+          path: |
+            ${{ env.DATA_DIR }}/sites/*/runs/
+            ${{ env.DATA_DIR }}/sites/*/screenshots/
+            !${{ env.DATA_DIR }}/**/auth/**
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Remove credentials file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/agentic-e2e-credentials.json"

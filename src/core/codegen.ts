@@ -28,37 +28,75 @@ This journey needs the logged-in test user "${user}". The browser context is ALR
 If the journey needs the account credentials (e.g. a "confirm your password" form), take them from the test fixtures: async ({ page, step, credentials }) => { ... credentials.username / credentials.password ... }.
 NEVER write credential values, e-mail addresses of the account or invented passwords as literals; the real values appear only as {{username}} / {{password}} placeholders and any literal secret makes the spec invalid. Never click log out, delete, remove or cancel actions.`;
 
-export interface SpecInput { journey: Journey; pages: PageModel[]; baseUrl: string; /** set in logged-in mode */ auth?: { user: string } }
+export interface SpecInput {
+  journey: Journey;
+  pages: PageModel[];
+  baseUrl: string;
+  /** set in logged-in mode */ auth?: { user: string };
+}
 
 function journeyPrompt({ journey, pages, baseUrl }: SpecInput): string {
   return `Site: ${baseUrl}\n\nJourney\nid: ${journey.id}\nname: ${journey.name}\ngoal: ${journey.goal}\nsteps:\n${journey.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nPage models:\n\n${pages.map((p) => pageToPrompt(p, { elements: 30, aria: 1000 })).join('\n\n')}\n\nWrite the Playwright spec for this journey.`;
 }
 
-export async function generateSpec(llm: LLMProvider, input: SpecInput, opts: { retries: number; redactor?: Redactor }): Promise<{ code: string; attempts: number }> {
-  const system = input.auth && input.journey.requiresAuth ? CODEGEN_SYSTEM + AUTH_CODEGEN_ADDENDUM(input.journey.user ?? input.auth.user) : CODEGEN_SYSTEM;
+export async function generateSpec(
+  llm: LLMProvider,
+  input: SpecInput,
+  opts: { retries: number; redactor?: Redactor },
+): Promise<{ code: string; attempts: number }> {
+  const system =
+    input.auth && input.journey.requiresAuth
+      ? CODEGEN_SYSTEM + AUTH_CODEGEN_ADDENDUM(input.journey.user ?? input.auth.user)
+      : CODEGEN_SYSTEM;
   let prompt = journeyPrompt(input);
   let lastErrors: string[] = [];
   const maxAttempts = opts.retries + 1;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const out = await llm.structured({ name: 'write_playwright_spec', description: 'Return the Playwright spec source.', system, prompt, schema: codeSchema });
+    const out = await llm.structured({
+      name: 'write_playwright_spec',
+      description: 'Return the Playwright spec source.',
+      system,
+      prompt,
+      schema: codeSchema,
+    });
     const code = stripFences(out.code);
     const v = await validateSpec(code, { redactor: opts.redactor });
     if (v.ok) return { code, attempts: attempt };
     lastErrors = v.errors;
     prompt = `${journeyPrompt(input)}\n\nYour previous attempt was INVALID:\n\n${opts.redactor ? opts.redactor.redact(code) : code}\n\nDiagnostics:\n${v.errors.map((e) => `- ${e}`).join('\n')}\n\nFix every diagnostic and return the complete corrected spec.`;
   }
-  throw new Error(`Generated spec for "${input.journey.id}" failed validation after ${maxAttempts} attempts: ${lastErrors.join('; ')}`);
+  throw new Error(
+    `Generated spec for "${input.journey.id}" failed validation after ${maxAttempts} attempts: ${lastErrors.join('; ')}`,
+  );
 }
 
 export interface GenerateOptions {
-  site: string; baseUrl: string; pages: PageModel[]; retries: number; requireApproval: boolean; regenerate?: boolean; onProgress?: ProgressFn;
-  /** SPEC-009 */ redactor?: Redactor; authUser?: string;
+  site: string;
+  baseUrl: string;
+  pages: PageModel[];
+  retries: number;
+  requireApproval: boolean;
+  regenerate?: boolean;
+  onProgress?: ProgressFn;
+  /** SPEC-009 */ redactor?: Redactor;
+  authUser?: string;
 }
-export interface GenerateResult { generated: string[]; skipped: string[]; failed: { id: string; error: string }[] }
+export interface GenerateResult {
+  generated: string[];
+  skipped: string[];
+  failed: { id: string; error: string }[];
+}
 
-export async function generateTests(store: Store, llm: LLMProvider, journeys: Journey[], opts: GenerateOptions): Promise<GenerateResult> {
+export async function generateTests(
+  store: Store,
+  llm: LLMProvider,
+  journeys: Journey[],
+  opts: GenerateOptions,
+): Promise<GenerateResult> {
   const res: GenerateResult = { generated: [], skipped: [], failed: [] };
-  const eligible = journeys.filter((j) => (opts.requireApproval ? j.status === 'approved' : j.status === 'approved' || j.status === 'selected'));
+  const eligible = journeys.filter((j) =>
+    opts.requireApproval ? j.status === 'approved' : j.status === 'approved' || j.status === 'selected',
+  );
   for (const journey of eligible) {
     if (!opts.regenerate && store.hasTest(opts.site, journey.id)) {
       res.skipped.push(journey.id);
@@ -67,11 +105,26 @@ export async function generateTests(store: Store, llm: LLMProvider, journeys: Jo
     }
     opts.onProgress?.({ type: 'info', stage: 'generate', message: `Generating test for "${journey.name}"` });
     try {
-      const { code, attempts } = await withLLMScope({ journeyId: journey.id }, () => generateSpec(llm, { journey, pages: opts.pages, baseUrl: opts.baseUrl, ...(opts.authUser ? { auth: { user: opts.authUser } } : {}) }, { retries: opts.retries, redactor: opts.redactor }));
+      const { code, attempts } = await withLLMScope({ journeyId: journey.id }, () =>
+        generateSpec(
+          llm,
+          {
+            journey,
+            pages: opts.pages,
+            baseUrl: opts.baseUrl,
+            ...(opts.authUser ? { auth: { user: opts.authUser } } : {}),
+          },
+          { retries: opts.retries, redactor: opts.redactor },
+        ),
+      );
       store.saveTest(opts.site, journey.id, code);
       store.saveTestVersion(opts.site, journey.id, 'original', code);
       res.generated.push(journey.id);
-      opts.onProgress?.({ type: 'info', stage: 'generate', message: `Saved ${journey.id}.spec.ts (${attempts} attempt${attempts > 1 ? 's' : ''})` });
+      opts.onProgress?.({
+        type: 'info',
+        stage: 'generate',
+        message: `Saved ${journey.id}.spec.ts (${attempts} attempt${attempts > 1 ? 's' : ''})`,
+      });
     } catch (e) {
       if (e instanceof LLMBudgetError) throw e; // SPEC-013 FR-16: stop the run, not just this journey
       const error = (e as Error).message;

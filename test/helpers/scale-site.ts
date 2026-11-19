@@ -1,7 +1,11 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-export interface ScaleSite { url: string; requests: { path: string; headers: http.IncomingHttpHeaders }[]; close: () => Promise<void> }
+export interface ScaleSite {
+  url: string;
+  requests: { path: string; headers: http.IncomingHttpHeaders }[];
+  close: () => Promise<void>;
+}
 
 /** SPEC-012: a tiny site that records every request's headers (to check env headers / base URLs). */
 export async function startScaleSite(title = 'Scale Site'): Promise<ScaleSite> {

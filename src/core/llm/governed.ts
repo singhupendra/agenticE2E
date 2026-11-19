@@ -27,7 +27,10 @@ const ZERO: LLMTokenUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 
  * Sits *inside* `RedactingLLM`, so everything it sees, caches and logs is already redacted.
  */
 export class GovernedLLM implements LLMProvider {
-  constructor(private inner: LLMProvider, private opts: GovernedOptions) {}
+  constructor(
+    private inner: LLMProvider,
+    private opts: GovernedOptions,
+  ) {}
 
   async structured<T>(req: StructuredRequest<T>): Promise<T> {
     const { usage, log, cache } = this.opts;
@@ -40,16 +43,34 @@ export class GovernedLLM implements LLMProvider {
     const target = { provider: this.opts.provider, model: this.opts.model };
     const span = this.opts.tracer?.startSpan(`llm ${req.name}`, {
       parent: this.opts.parentSpan?.(),
-      attributes: { 'gen_ai.system': target.provider, 'gen_ai.request.model': target.model, 'gen_ai.operation.name': req.name, ...(currentLLMScope()?.journeyId ? { 'agentic_e2e.journey_id': currentLLMScope()!.journeyId! } : {}) },
+      attributes: {
+        'gen_ai.system': target.provider,
+        'gen_ai.request.model': target.model,
+        'gen_ai.operation.name': req.name,
+        ...(currentLLMScope()?.journeyId ? { 'agentic_e2e.journey_id': currentLLMScope()!.journeyId! } : {}),
+      },
     });
     const started = Date.now();
     const scope = currentLLMScope();
-    const attribution = { ...(scope?.journeyId ? { journeyId: scope.journeyId } : {}), ...(scope?.project ? { project: scope.project } : {}) };
+    const attribution = {
+      ...(scope?.journeyId ? { journeyId: scope.journeyId } : {}),
+      ...(scope?.project ? { project: scope.project } : {}),
+    };
 
     const key = cache?.readable ? cache.key(req as StructuredRequest<unknown>, target) : undefined;
     const hit = key ? await cache!.get(key, req.schema) : undefined;
     if (hit !== undefined) {
-      const rec = usage.record({ ...attribution, name: req.name, ...target, ...ZERO, latencyMs: Date.now() - started, costUsd: 0, retries: 0, cached: true, ok: true });
+      const rec = usage.record({
+        ...attribution,
+        name: req.name,
+        ...target,
+        ...ZERO,
+        latencyMs: Date.now() - started,
+        costUsd: 0,
+        retries: 0,
+        cached: true,
+        ok: true,
+      });
       log?.info({ call: rec.n, name: req.name, model: target.model, cached: true }, 'llm.call');
       span?.setAttributes({ 'agentic_e2e.cached': true, 'agentic_e2e.cost_usd': 0 });
       span?.end();
@@ -57,24 +78,57 @@ export class GovernedLLM implements LLMProvider {
     }
 
     try {
-      const { value, retries } = await withRetry(async (signal) => {
-        if (isDetailedProvider(this.inner)) return this.inner.structuredDetailed(req, { signal });
-        return { data: await this.inner.structured(req) };
-      }, {
-        ...this.opts.retry,
-        onRetry: (i) => log?.warn({ call: usage.calls.length + 1, name: req.name, attempt: i.attempt, status: i.status, delayMs: i.delayMs, error: i.error }, 'llm.retry'),
-      });
+      const { value, retries } = await withRetry(
+        async (signal) => {
+          if (isDetailedProvider(this.inner)) return this.inner.structuredDetailed(req, { signal });
+          return { data: await this.inner.structured(req) };
+        },
+        {
+          ...this.opts.retry,
+          onRetry: (i) =>
+            log?.warn(
+              {
+                call: usage.calls.length + 1,
+                name: req.name,
+                attempt: i.attempt,
+                status: i.status,
+                delayMs: i.delayMs,
+                error: i.error,
+              },
+              'llm.retry',
+            ),
+        },
+      );
       const model = value.model ?? target.model;
       const u = value.usage ?? ZERO;
       const costUsd = estimateCostUsd(model, u);
-      const rec = usage.record({ ...attribution, name: req.name, provider: target.provider, model, ...u, latencyMs: Date.now() - started, costUsd, retries, cached: false, ok: true });
+      const rec = usage.record({
+        ...attribution,
+        name: req.name,
+        provider: target.provider,
+        model,
+        ...u,
+        latencyMs: Date.now() - started,
+        costUsd,
+        retries,
+        cached: false,
+        ok: true,
+      });
       log?.info({ call: rec.n, name: req.name, model, ...u, latencyMs: rec.latencyMs, costUsd, retries }, 'llm.call');
       span?.setAttributes({
-        'gen_ai.response.model': model, 'gen_ai.usage.input_tokens': u.inputTokens, 'gen_ai.usage.output_tokens': u.outputTokens,
-        'gen_ai.usage.cache_read_input_tokens': u.cacheReadTokens, 'gen_ai.usage.cache_creation_input_tokens': u.cacheWriteTokens,
-        'agentic_e2e.cost_usd': costUsd, 'agentic_e2e.cached': false, 'agentic_e2e.retries': retries,
+        'gen_ai.response.model': model,
+        'gen_ai.usage.input_tokens': u.inputTokens,
+        'gen_ai.usage.output_tokens': u.outputTokens,
+        'gen_ai.usage.cache_read_input_tokens': u.cacheReadTokens,
+        'gen_ai.usage.cache_creation_input_tokens': u.cacheWriteTokens,
+        'agentic_e2e.cost_usd': costUsd,
+        'agentic_e2e.cached': false,
+        'agentic_e2e.retries': retries,
       });
-      if (key) await cache!.set(key, { name: req.name, model, output: value.data }).catch((e) => log?.warn({ error: (e as Error).message }, 'llm.cache_write_failed'));
+      if (key)
+        await cache!
+          .set(key, { name: req.name, model, output: value.data })
+          .catch((e) => log?.warn({ error: (e as Error).message }, 'llm.cache_write_failed'));
       try {
         usage.check('after');
       } catch (e) {
@@ -91,9 +145,40 @@ export class GovernedLLM implements LLMProvider {
         const model = (e as { model?: string }).model ?? target.model;
         const u = paid ?? ZERO;
         const costUsd = paid ? estimateCostUsd(model, u) : 0;
-        const rec = usage.record({ ...attribution, name: req.name, provider: target.provider, model, ...u, latencyMs: Date.now() - started, costUsd, retries, cached: false, ok: false, error: (e as Error).message });
-        log?.error({ call: rec.n, name: req.name, model, retries, ...(paid ? { ...u, costUsd } : {}), error: (e as Error).message }, 'llm.failed');
-        span?.setAttributes({ 'agentic_e2e.retries': retries, ...(paid ? { 'gen_ai.usage.input_tokens': u.inputTokens, 'gen_ai.usage.output_tokens': u.outputTokens, 'agentic_e2e.cost_usd': costUsd } : {}) });
+        const rec = usage.record({
+          ...attribution,
+          name: req.name,
+          provider: target.provider,
+          model,
+          ...u,
+          latencyMs: Date.now() - started,
+          costUsd,
+          retries,
+          cached: false,
+          ok: false,
+          error: (e as Error).message,
+        });
+        log?.error(
+          {
+            call: rec.n,
+            name: req.name,
+            model,
+            retries,
+            ...(paid ? { ...u, costUsd } : {}),
+            error: (e as Error).message,
+          },
+          'llm.failed',
+        );
+        span?.setAttributes({
+          'agentic_e2e.retries': retries,
+          ...(paid
+            ? {
+                'gen_ai.usage.input_tokens': u.inputTokens,
+                'gen_ai.usage.output_tokens': u.outputTokens,
+                'agentic_e2e.cost_usd': costUsd,
+              }
+            : {}),
+        });
         span?.recordError(e);
         if (paid) {
           try {

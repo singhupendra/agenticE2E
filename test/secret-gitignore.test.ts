@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { packageRoot } from '../src/core/paths.js';
 
-const ignored = (p: string) => spawnSync('git', ['check-ignore', '-q', '--no-index', p], { cwd: packageRoot() }).status === 0;
+const ignored = (p: string) =>
+  spawnSync('git', ['check-ignore', '-q', '--no-index', p], { cwd: packageRoot() }).status === 0;
 
 describe('gitignore protects credentials (SPEC-009 AC-7)', () => {
   it.each([

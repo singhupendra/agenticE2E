@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import { createTwoFilesPatch } from 'diff';
 import { LLMBudgetError, type LLMProvider } from './llm/types.js';
 import { healSchema } from './llm/schemas.js';
@@ -64,9 +63,15 @@ function buildPrompt(code: string, f: TestResult, feedback: string[]): string {
     `Journey: ${f.journeyId}`,
     `Current test code:\n\`\`\`ts\n${code}\`\`\``,
     `Failure (${f.status}):\n${(f.error ?? 'unknown error').slice(0, 4000)}`,
-    snap ? `Page at failure: ${snap.url} — "${snap.title}"\n\nARIA snapshot:\n${snap.ariaSnapshot.slice(0, 8000)}\n\nHTML excerpt:\n${snap.html.slice(0, 10000)}` : 'No page snapshot was captured.',
-    feedback.length ? `Feedback from earlier attempts — do not repeat these mistakes:\n${feedback.map((x) => `- ${x}`).join('\n')}` : '',
-  ].filter(Boolean).join('\n\n');
+    snap
+      ? `Page at failure: ${snap.url} — "${snap.title}"\n\nARIA snapshot:\n${snap.ariaSnapshot.slice(0, 8000)}\n\nHTML excerpt:\n${snap.html.slice(0, 10000)}`
+      : 'No page snapshot was captured.',
+    feedback.length
+      ? `Feedback from earlier attempts — do not repeat these mistakes:\n${feedback.map((x) => `- ${x}`).join('\n')}`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /** Try to repair one failing test. Never leaves a worse test than the original active. */
@@ -90,10 +95,18 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
 
   try {
     for (let n = 1; n <= opts.attempts; n++) {
-      opts.onProgress?.({ type: 'info', stage: 'heal', message: `Healing "${journeyId}" — attempt ${n}/${opts.attempts}` });
+      opts.onProgress?.({
+        type: 'info',
+        stage: 'heal',
+        message: `Healing "${journeyId}" — attempt ${n}/${opts.attempts}`,
+      });
       const out = await llm.structured({
-        name: 'heal_test', description: 'Diagnose a failing Playwright test and optionally return a patched spec.', system: HEAL_SYSTEM,
-        prompt: buildPrompt(current, last, feedback), schema: healSchema, images: readImage(store, site, last.failure?.screenshot),
+        name: 'heal_test',
+        description: 'Diagnose a failing Playwright test and optionally return a patched spec.',
+        system: HEAL_SYSTEM,
+        prompt: buildPrompt(current, last, feedback),
+        schema: healSchema,
+        images: readImage(store, site, last.failure?.screenshot),
       });
       verdict = out.verdict;
       reason = out.reason;
@@ -106,21 +119,41 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
       if (out.verdict === 'flaky_or_environment') {
         const rerun = (await opts.runner([journeyId])).results[0];
         attempts.push({ n, verdict, reason, accepted: true, passed: rerun.status === 'passed', error: rerun.error });
-        if (rerun.status === 'passed') { outcome = 'flaky_or_environment'; break; }
+        if (rerun.status === 'passed') {
+          outcome = 'flaky_or_environment';
+          break;
+        }
         lastRerunError = rerun.error ?? `test ${rerun.status}`;
         last = rerun;
-        feedback.push(`Attempt ${n}: you called it flaky/environment but a plain re-run still failed: ${(rerun.error ?? '').slice(0, 500)}`);
+        feedback.push(
+          `Attempt ${n}: you called it flaky/environment but a plain re-run still failed: ${(rerun.error ?? '').slice(0, 500)}`,
+        );
         continue;
       }
 
-      const reject = (rejection: string) => { attempts.push({ n, verdict, reason, accepted: false, rejection }); feedback.push(`Attempt ${n} rejected: ${rejection}`); };
-      if (!out.code) { reject('verdict was test_breakage but no code was returned'); continue; }
+      const reject = (rejection: string) => {
+        attempts.push({ n, verdict, reason, accepted: false, rejection });
+        feedback.push(`Attempt ${n} rejected: ${rejection}`);
+      };
+      if (!out.code) {
+        reject('verdict was test_breakage but no code was returned');
+        continue;
+      }
       const patched = stripFences(out.code);
-      if (patched === current) { reject('patch is identical to the current code'); continue; }
+      if (patched === current) {
+        reject('patch is identical to the current code');
+        continue;
+      }
       const weak = weakensAssertions(original, patched);
-      if (weak) { reject(weak); continue; }
+      if (weak) {
+        reject(weak);
+        continue;
+      }
       const v = await validateSpec(patched, { redactor: opts.redactor });
-      if (!v.ok) { reject(`patch failed validation: ${v.errors.join('; ')}`); continue; }
+      if (!v.ok) {
+        reject(`patch failed validation: ${v.errors.join('; ')}`);
+        continue;
+      }
 
       store.saveTest(site, journeyId, patched);
       const rerun = (await opts.runner([journeyId])).results[0];
@@ -128,7 +161,15 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
       attempts.push({ n, verdict, reason, accepted: true, passed, error: passed ? undefined : rerun.error });
       if (passed) {
         store.saveTestVersion(site, journeyId, `healed-${store.listTestVersions(site, journeyId).length}`, patched);
-        diff = createTwoFilesPatch(`${journeyId}.spec.ts (original)`, `${journeyId}.spec.ts (healed)`, original, patched, '', '', { context: 3 });
+        diff = createTwoFilesPatch(
+          `${journeyId}.spec.ts (original)`,
+          `${journeyId}.spec.ts (healed)`,
+          original,
+          patched,
+          '',
+          '',
+          { context: 3 },
+        );
         outcome = 'healed';
         break;
       }
@@ -149,13 +190,29 @@ export async function healTest(store: Store, llm: LLMProvider, opts: HealOptions
   let candidateDiff: string | undefined;
   if (outcome === 'failed' && candidate !== undefined) {
     store.saveTestVersion(site, journeyId, `candidate-${store.listTestVersions(site, journeyId).length}`, candidate);
-    candidateDiff = createTwoFilesPatch(`${journeyId}.spec.ts (original)`, `${journeyId}.spec.ts (candidate)`, original, candidate, '', '', { context: 3 });
+    candidateDiff = createTwoFilesPatch(
+      `${journeyId}.spec.ts (original)`,
+      `${journeyId}.spec.ts (candidate)`,
+      original,
+      candidate,
+      '',
+      '',
+      { context: 3 },
+    );
   }
   const record: HealRecord = {
     id: `${journeyId}-${new Date().toISOString().replace(/[:.]/g, '-')}`,
-    journeyId, at: new Date().toISOString(), outcome, verdict, reason,
-    originalError: (opts.failure.error ?? '').slice(0, 4000), attempts, diff,
-    ...(outcome === 'failed' && !aborted && lastRerunError !== undefined ? { lastError: lastRerunError.slice(0, 4000) } : {}),
+    journeyId,
+    at: new Date().toISOString(),
+    outcome,
+    verdict,
+    reason,
+    originalError: (opts.failure.error ?? '').slice(0, 4000),
+    attempts,
+    diff,
+    ...(outcome === 'failed' && !aborted && lastRerunError !== undefined
+      ? { lastError: lastRerunError.slice(0, 4000) }
+      : {}),
     ...(candidateDiff !== undefined ? { candidateDiff } : {}),
   };
   store.appendHeal(site, record);

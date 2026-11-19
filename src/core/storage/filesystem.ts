@@ -11,7 +11,9 @@ const TMP_SUFFIX = '.ae2e-tmp';
 export class FilesystemBackend implements StorageBackend {
   readonly kind = 'filesystem';
   readonly root: string;
-  constructor(root: string) { this.root = path.resolve(root); }
+  constructor(root: string) {
+    this.root = path.resolve(root);
+  }
 
   /** Absolute path of a key, or null when it resolves (through symlinks) outside the root. */
   private async inside(key: string): Promise<string | null> {
@@ -31,14 +33,18 @@ export class FilesystemBackend implements StorageBackend {
     return st?.isFile() ? p : null;
   }
 
-  async read(key: string) { const f = await this.file(key); return f ? fsp.readFile(f) : null; }
+  async read(key: string) {
+    const f = await this.file(key);
+    return f ? fsp.readFile(f) : null;
+  }
 
   async write(key: string, data: Buffer | string, opts: { mode?: number } = {}) {
     const abs = path.join(this.root, ...assertKey(key).split('/'));
     await fsp.mkdir(path.dirname(abs), { recursive: true });
     const dirReal = await fsp.realpath(path.dirname(abs));
     const rootReal = await fsp.realpath(this.root);
-    if (dirReal !== rootReal && !dirReal.startsWith(rootReal + path.sep)) throw new Error('Storage key escapes the data directory');
+    if (dirReal !== rootReal && !dirReal.startsWith(rootReal + path.sep))
+      throw new Error('Storage key escapes the data directory');
     const tmp = `${abs}.${randomBytes(6).toString('hex')}${TMP_SUFFIX}`;
     try {
       await fsp.writeFile(tmp, data, { mode: opts.mode ?? 0o644 });
@@ -50,7 +56,9 @@ export class FilesystemBackend implements StorageBackend {
     }
   }
 
-  async exists(key: string) { return (await this.file(key)) !== null; }
+  async exists(key: string) {
+    return (await this.file(key)) !== null;
+  }
 
   async stat(key: string) {
     const f = await this.file(key);
@@ -72,7 +80,11 @@ export class FilesystemBackend implements StorageBackend {
     };
     // Walk only the deepest directory fully named by the prefix.
     const dirPart = prefix.includes('/') ? prefix.slice(0, prefix.lastIndexOf('/')) : '';
-    const start = dirPart ? await this.inside(dirPart) : (fs.existsSync(this.root) ? await fsp.realpath(this.root) : null);
+    const start = dirPart
+      ? await this.inside(dirPart)
+      : fs.existsSync(this.root)
+        ? await fsp.realpath(this.root)
+        : null;
     if (start) await walk(start, dirPart);
     return out.filter((k) => k.startsWith(prefix)).sort();
   }

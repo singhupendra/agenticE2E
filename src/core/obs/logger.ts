@@ -6,15 +6,37 @@ export const LOG_FORMATS = ['pretty', 'json'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 export type LogFormat = (typeof LOG_FORMATS)[number];
 export type Logger = pino.Logger;
-export interface LogStream { write(line: string): void }
+export interface LogStream {
+  write(line: string): void;
+}
 
 export const REDACTED = '[REDACTED]';
 
 /** Field names whose values are always censored, wherever they appear (one or two levels deep). */
-const SENSITIVE_KEYS = ['password', 'passwd', 'apiKey', 'api_key', 'authorization', 'Authorization', 'token', 'accessToken', 'secret', 'secretAccessKey', 'sessionToken', 'cookie', 'E2E_PASSWORD', 'x-api-key', 'X-Api-Key', 'X-API-Key', 'x-auth-token'];
+const SENSITIVE_KEYS = [
+  'password',
+  'passwd',
+  'apiKey',
+  'api_key',
+  'authorization',
+  'Authorization',
+  'token',
+  'accessToken',
+  'secret',
+  'secretAccessKey',
+  'sessionToken',
+  'cookie',
+  'E2E_PASSWORD',
+  'x-api-key',
+  'X-Api-Key',
+  'X-API-Key',
+  'x-auth-token',
+];
 /** pino/fast-redact paths: dot syntax for identifiers, bracket syntax for hyphenated keys (`*.*["x-api-key"]`). */
 const segment = (k: string) => (/^[A-Za-z_$][\w$]*$/.test(k) ? `.${k}` : `[${JSON.stringify(k)}]`);
-const REDACT_PATHS = SENSITIVE_KEYS.flatMap((k) => ['', '*', '*.*'].map((prefix) => `${prefix}${segment(k)}`.replace(/^\./, '')));
+const REDACT_PATHS = SENSITIVE_KEYS.flatMap((k) =>
+  ['', '*', '*.*'].map((prefix) => `${prefix}${segment(k)}`.replace(/^\./, '')),
+);
 
 /** SPEC-013 FR-6: well-known secret shapes, scrubbed even when their value was never registered. */
 const SECRET_PATTERNS: [RegExp, string][] = [
@@ -30,14 +52,17 @@ export function scrubSecrets(s: string): string {
 }
 
 const LEVEL_LABEL_WIDTH = 5;
-const fmtValue = (v: unknown): string => (typeof v === 'string' ? (/\s/.test(v) ? JSON.stringify(v) : v) : JSON.stringify(v));
+const fmtValue = (v: unknown): string =>
+  typeof v === 'string' ? (/\s/.test(v) ? JSON.stringify(v) : v) : JSON.stringify(v);
 
 /** `HH:MM:SS.mmm LEVEL msg key=value …` from one pino JSON line. */
 function prettyLine(json: string): string {
   try {
     const { time, level, msg, ...rest } = JSON.parse(json) as Record<string, unknown>;
     const t = typeof time === 'string' ? time.slice(11, 23) : new Date().toISOString().slice(11, 23);
-    const fields = Object.entries(rest).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${fmtValue(v)}`);
+    const fields = Object.entries(rest)
+      .filter(([, v]) => v !== undefined)
+      .map(([k, v]) => `${k}=${fmtValue(v)}`);
     return `${t} ${String(level).toUpperCase().padEnd(LEVEL_LABEL_WIDTH)} ${msg ?? ''}${fields.length ? ' ' + fields.join(' ') : ''}\n`;
   } catch {
     return json;
@@ -49,7 +74,15 @@ function prettyLine(json: string): string {
  * `Redactor` (credential + env secret values) and the secret-shape scrubber *before* it is written, so nothing nested
  * in an error message or object can leak.
  */
-export function createLogger(opts: { level?: LogLevel; format?: LogFormat; redactor?: Redactor; stream?: LogStream; bindings?: Record<string, unknown> } = {}): Logger {
+export function createLogger(
+  opts: {
+    level?: LogLevel;
+    format?: LogFormat;
+    redactor?: Redactor;
+    stream?: LogStream;
+    bindings?: Record<string, unknown>;
+  } = {},
+): Logger {
   const redactor = opts.redactor ?? Redactor.empty();
   const out = opts.stream ?? process.stderr;
   const format = opts.format ?? 'pretty';
@@ -59,13 +92,16 @@ export function createLogger(opts: { level?: LogLevel; format?: LogFormat; redac
       out.write(format === 'json' ? safe : prettyLine(safe));
     },
   };
-  const logger = pino({
-    level: opts.level ?? 'warn',
-    base: null,
-    timestamp: pino.stdTimeFunctions.isoTime,
-    formatters: { level: (label) => ({ level: label }) },
-    redact: { paths: REDACT_PATHS, censor: REDACTED },
-    serializers: { err: pino.stdSerializers.err },
-  }, destination);
+  const logger = pino(
+    {
+      level: opts.level ?? 'warn',
+      base: null,
+      timestamp: pino.stdTimeFunctions.isoTime,
+      formatters: { level: (label) => ({ level: label }) },
+      redact: { paths: REDACT_PATHS, censor: REDACTED },
+      serializers: { err: pino.stdSerializers.err },
+    },
+    destination,
+  );
   return opts.bindings ? logger.child(opts.bindings) : logger;
 }

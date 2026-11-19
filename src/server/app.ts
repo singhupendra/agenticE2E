@@ -24,15 +24,31 @@ import { OBS_SERVER_ONLY_KEYS } from '../core/obs/config.js';
 import { addTotals, emptyTotals } from '../core/llm/usage.js';
 
 const FILE_PREFIXES = ['screenshots/', 'runs/'];
-const MIME: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.zip': 'application/zip', '.json': 'application/json', '.log': 'text/plain', '.webm': 'video/webm' };
+const MIME: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.zip': 'application/zip',
+  '.json': 'application/json',
+  '.log': 'text/plain',
+  '.webm': 'video/webm',
+};
 
 /**
  * `awsEnv` is a test seam: the environment used to locate the AWS config/credentials files (default: process.env).
  * SPEC-014: `auth` defaults to no authentication (legacy, in-process use); `startServer` always passes an explicit mode.
  * `storage` defaults to the filesystem backend on `config.dataDir`.
  */
-export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir?: string; host?: string; awsEnv?: Record<string, string | undefined>; auth?: AuthOptions; storage?: StorageBackend }): Promise<FastifyInstance> {
-  if (!opts.auth && opts.host && ['0.0.0.0', '::'].includes(opts.host)) throw new Error(`Refusing to serve on ${opts.host} without auth: pass an auth mode (API tokens)`);
+export async function buildApp(opts: {
+  config: Config;
+  llm?: LLMProvider;
+  webDir?: string;
+  host?: string;
+  awsEnv?: Record<string, string | undefined>;
+  auth?: AuthOptions;
+  storage?: StorageBackend;
+}): Promise<FastifyInstance> {
+  if (!opts.auth && opts.host && ['0.0.0.0', '::'].includes(opts.host))
+    throw new Error(`Refusing to serve on ${opts.host} without auth: pass an auth mode (API tokens)`);
   const { server } = opts.config;
   const app = Fastify({ logger: false, bodyLimit: server.bodyLimitBytes, trustProxy: server.trustProxy });
   const store = new Store(opts.config.dataDir);
@@ -41,9 +57,15 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   const lifecycle = new Lifecycle({ activeJobs: () => jobs.list().filter((j) => j.status === 'running').length });
   setLifecycle(app, lifecycle);
   const auditFile = path.join(opts.config.dataDir, AUDIT_FILE);
-  const audit = new AuditLog({ file: auditFile, actor: 'web:unknown', enabled: opts.config.auditLog, redactor: buildLogRedactor([]) }); // SPEC-013 FR-23
+  const audit = new AuditLog({
+    file: auditFile,
+    actor: 'web:unknown',
+    enabled: opts.config.auditLog,
+    redactor: buildLogRedactor([]),
+  }); // SPEC-013 FR-23
   /** SPEC-013 FR-25 + SPEC-014: who (token / principal name, never the token) and from where. */
-  const webActor = (req: { ip?: string; principal?: { name: string } | null }) => `web:${req.principal?.name ?? 'anonymous'}@${req.ip ?? 'unknown'}`;
+  const webActor = (req: { ip?: string; principal?: { name: string } | null }) =>
+    `web:${req.principal?.name ?? 'anonymous'}@${req.ip ?? 'unknown'}`;
 
   // This server runs generated tests and spends LLM credits. Defences:
   //  1. Host allowlist on every request (stops DNS rebinding: a rebound page has Host == Origin == attacker.com).
@@ -54,16 +76,25 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   if (opts.host && !['0.0.0.0', '::'].includes(opts.host)) allowedHosts.add(hostKey(opts.host));
   for (const h of server.allowedHosts) allowedHosts.add(hostKey(h)); // SPEC-014: deployments behind a hostname
   const hostnameOf = (hostHeader: string | undefined) => {
-    try { return new URL(`http://${hostHeader ?? ''}`).hostname.toLowerCase(); } catch { return ''; }
+    try {
+      return new URL(`http://${hostHeader ?? ''}`).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
   };
   app.addHook('onRequest', async (req, reply) => {
     if (!allowedHosts.has(hostnameOf(req.headers.host))) return reply.code(403).send({ error: 'Host not allowed' });
     if (req.method === 'GET' || req.method === 'HEAD') return;
-    if (!/^application\/json(\s*;|$)/i.test(req.headers['content-type'] ?? '')) return reply.code(415).send({ error: 'Content-Type must be application/json' });
+    if (!/^application\/json(\s*;|$)/i.test(req.headers['content-type'] ?? ''))
+      return reply.code(415).send({ error: 'Content-Type must be application/json' });
     const origin = req.headers.origin;
     if (origin) {
       let host = '';
-      try { host = new URL(origin).host; } catch { /* invalid origin */ }
+      try {
+        host = new URL(origin).host;
+      } catch {
+        /* invalid origin */
+      }
       if (host !== req.headers.host) return reply.code(403).send({ error: 'Cross-origin request rejected' });
     }
   });
@@ -80,41 +111,79 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
       return null;
     }
     const meta = store.loadSite(site);
-    if (!meta) { reply.code(404).send({ error: `Unknown site ${site}` }); return null; }
+    if (!meta) {
+      reply.code(404).send({ error: `Unknown site ${site}` });
+      return null;
+    }
     return meta;
   };
 
   app.get('/api/health', async () => ({ ok: true }));
   app.get('/api/config', async () => {
-    const { dataDir: _d, maxTokens: _m, awsRegion: _r, credentialsFile: _c, server: _s, environments, ...pub } = opts.config;
+    const {
+      dataDir: _d,
+      maxTokens: _m,
+      awsRegion: _r,
+      credentialsFile: _c,
+      server: _s,
+      environments,
+      ...pub
+    } = opts.config;
     // SPEC-013: server-only settings (budget, logging, retries) are not job options, so the UI must not echo them back.
-    const visible = Object.fromEntries(Object.entries(pub).filter(([k]) => !(OBS_SERVER_ONLY_KEYS as readonly string[]).includes(k)));
+    const visible = Object.fromEntries(
+      Object.entries(pub).filter(([k]) => !(OBS_SERVER_ONLY_KEYS as readonly string[]).includes(k)),
+    );
     return { ...visible, environments: publicEnvironments(environments) }; // SPEC-012: header names only, never values
   });
   app.get<{ Querystring: { provider?: string } }>('/api/models', async (req, reply) => {
     const provider = req.query.provider ?? opts.config.provider;
-    if (!(PROVIDERS as readonly string[]).includes(provider)) return reply.code(400).send({ error: `provider must be one of ${PROVIDERS.join(', ')}` });
+    if (!(PROVIDERS as readonly string[]).includes(provider))
+      return reply.code(400).send({ error: `provider must be one of ${PROVIDERS.join(', ')}` });
     return { provider, models: listModels(provider as ProviderId) };
   });
   // Profile *names* only; never keys, secrets or tokens.
-  app.get('/api/aws-profiles', async () => ({ profiles: listAwsProfiles(opts.awsEnv ?? process.env), ...(opts.config.awsProfile ? { selected: opts.config.awsProfile } : {}) }));
+  app.get('/api/aws-profiles', async () => ({
+    profiles: listAwsProfiles(opts.awsEnv ?? process.env),
+    ...(opts.config.awsProfile ? { selected: opts.config.awsProfile } : {}),
+  }));
   // SPEC-009: names only. Never usernames, passwords, hints' selectors, file paths or storageState contents.
   app.get<{ Querystring: { url?: string } }>('/api/auth', async (req, reply) => {
     let site: string;
-    try { site = normalizeSite(req.query.url ?? '').id; } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
     try {
-      const creds = loadCredentials({ file: opts.config.credentialsFile ?? path.resolve(DEFAULT_CREDENTIALS_FILE), explicit: !!opts.config.credentialsFile });
+      site = normalizeSite(req.query.url ?? '').id;
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
+    try {
+      const creds = loadCredentials({
+        file: opts.config.credentialsFile ?? path.resolve(DEFAULT_CREDENTIALS_FILE),
+        explicit: !!opts.config.credentialsFile,
+      });
       return { configured: creds.hasSite(site), users: creds.userNames(site) };
     } catch (e) {
       console.error(`[agentic-e2e] GET /api/auth: ${(e as Error).message}`); // detail (path, env var names) stays server-side
       return { configured: false, users: [], error: publicError(e) };
     }
   });
-  app.get('/api/sites', async () => store.listSites().map((s) => {
-    const runs = store.listRuns(s.id);
-    const last = runs.at(-1);
-    return { ...s, journeys: store.loadJourneys(s.id)?.length ?? 0, tests: store.listTests(s.id).length, runs: runs.length, lastRun: last ? { id: last.id, passed: last.results.filter((r) => r.status === 'passed').length, total: last.results.length } : null };
-  }));
+  app.get('/api/sites', async () =>
+    store.listSites().map((s) => {
+      const runs = store.listRuns(s.id);
+      const last = runs.at(-1);
+      return {
+        ...s,
+        journeys: store.loadJourneys(s.id)?.length ?? 0,
+        tests: store.listTests(s.id).length,
+        runs: runs.length,
+        lastRun: last
+          ? {
+              id: last.id,
+              passed: last.results.filter((r) => r.status === 'passed').length,
+              total: last.results.length,
+            }
+          : null,
+      };
+    }),
+  );
 
   app.get<{ Params: { site: string } }>('/api/sites/:site', async (req, reply) => {
     const meta = siteOr404(req.params.site, reply);
@@ -123,9 +192,24 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     return {
       meta,
       journeys: store.loadJourneys(id) ?? [],
-      pages: (store.loadPages(id) ?? []).map((p) => ({ path: p.path, title: p.title, depth: p.depth, screenshot: p.screenshot })),
+      pages: (store.loadPages(id) ?? []).map((p) => ({
+        path: p.path,
+        title: p.title,
+        depth: p.depth,
+        screenshot: p.screenshot,
+      })),
       tests: store.listTests(id).map((t) => ({ id: t, versions: store.listTestVersions(id, t) })),
-      runs: store.listRuns(id).map((r) => ({ id: r.id, kind: r.kind, startedAt: r.startedAt, screenshots: r.screenshots, env: r.env, results: r.results.map((x) => ({ journeyId: x.journeyId, status: x.status, project: x.project, env: x.env })) })).reverse(),
+      runs: store
+        .listRuns(id)
+        .map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          startedAt: r.startedAt,
+          screenshots: r.screenshots,
+          env: r.env,
+          results: r.results.map((x) => ({ journeyId: x.journeyId, status: x.status, project: x.project, env: x.env })),
+        }))
+        .reverse(),
       heals: store.loadHeals(id).slice().reverse(),
     };
   });
@@ -147,9 +231,16 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   // SPEC-013 FR-25: audit entries (viewer+ via SPEC-014 GET rule). Entries are redacted when written; actors are names, not tokens.
   app.get<{ Querystring: { site?: string; limit?: string } }>('/api/audit', async (req, reply) => {
     const { site, limit } = req.query;
-    if (site !== undefined) { try { store.siteDir(site); } catch (e) { return reply.code(400).send({ error: (e as Error).message }); } }
+    if (site !== undefined) {
+      try {
+        store.siteDir(site);
+      } catch (e) {
+        return reply.code(400).send({ error: (e as Error).message });
+      }
+    }
     const n = limit === undefined ? 200 : Number(limit);
-    if (!Number.isInteger(n) || n < 1 || n > 10_000) return reply.code(400).send({ error: 'limit must be an integer between 1 and 10000' });
+    if (!Number.isInteger(n) || n < 1 || n > 10_000)
+      return reply.code(400).send({ error: 'limit must be an integer between 1 and 10000' });
     return { entries: readAuditLog(auditFile, { site, limit: n }) };
   });
 
@@ -160,7 +251,8 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
       const journeys = parseJourneys(req.body);
       const changes = journeyStatusChanges(store.loadJourneys(meta.id) ?? [], journeys);
       store.saveJourneys(meta.id, journeys);
-      if (changes.length) audit.append('journeys.status_changed', { site: meta.id, actor: webActor(req), details: { changes } });
+      if (changes.length)
+        audit.append('journeys.status_changed', { site: meta.id, actor: webActor(req), details: { changes } });
       return journeys;
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
@@ -173,7 +265,9 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     try {
       const code = store.loadTest(meta.id, req.params.id);
       if (code === null) return reply.code(404).send({ error: 'No such test' });
-      const versions = store.listTestVersions(meta.id, req.params.id).map((name) => ({ name, code: store.loadTestVersion(meta.id, req.params.id, name) }));
+      const versions = store
+        .listTestVersions(meta.id, req.params.id)
+        .map((name) => ({ name, code: store.loadTestVersion(meta.id, req.params.id, name) }));
       return { id: req.params.id, code, versions };
     } catch (e) {
       return reply.code(400).send({ error: (e as Error).message });
@@ -196,7 +290,8 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     if (!meta) return;
     const rel = req.params['*'];
     try {
-      if (!FILE_PREFIXES.some((p) => rel.startsWith(p)) || rel.split(/[\\/]/).includes('..')) return reply.code(403).send({ error: 'Forbidden' });
+      if (!FILE_PREFIXES.some((p) => rel.startsWith(p)) || rel.split(/[\\/]/).includes('..'))
+        return reply.code(403).send({ error: 'Forbidden' });
       const abs = store.resolveFile(meta.id, rel);
       const mime = MIME[path.extname(abs).toLowerCase()];
       if (!mime) return reply.code(403).send({ error: 'File type not served' });
@@ -211,17 +306,29 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
 
   app.post('/api/jobs', async (req, reply) => {
     let jr;
-    try { jr = parseJobRequest(req.body); } catch (e) { return reply.code(400).send({ error: (e as Error).message }); }
+    try {
+      jr = parseJobRequest(req.body);
+    } catch (e) {
+      return reply.code(400).send({ error: (e as Error).message });
+    }
     if (jr.action === 'heal' && (jr.journeyIds?.length || jr.failedOnly)) {
-      try { resolveHealSelection(store, normalizeSite(jr.url).id, { ids: jr.journeyIds, failedOnly: jr.failedOnly }); } catch (e) {
-        if (e instanceof HealSelectionError) return reply.code(400).send({ error: e.message, validIds: e.validIds, unknownIds: e.unknownIds });
+      try {
+        resolveHealSelection(store, normalizeSite(jr.url).id, { ids: jr.journeyIds, failedOnly: jr.failedOnly });
+      } catch (e) {
+        if (e instanceof HealSelectionError)
+          return reply.code(400).send({ error: e.message, validIds: e.validIds, unknownIds: e.unknownIds });
         if (e instanceof UnknownSiteError) return reply.code(404).send({ error: e.message });
         return reply.code(400).send({ error: (e as Error).message });
       }
     }
     const profile = jr.options?.awsProfile;
     // Only meaningful (and only checked) when the job will actually use Bedrock.
-    if (profile && (jr.options?.provider ?? opts.config.provider) === 'bedrock' && !listAwsProfiles(opts.awsEnv ?? process.env).includes(profile)) return reply.code(400).send({ error: `Unknown AWS profile "${profile}"` });
+    if (
+      profile &&
+      (jr.options?.provider ?? opts.config.provider) === 'bedrock' &&
+      !listAwsProfiles(opts.awsEnv ?? process.env).includes(profile)
+    )
+      return reply.code(400).send({ error: `Unknown AWS profile "${profile}"` });
     try {
       const job = jobs.start(jr, { actor: webActor(req) });
       return reply.code(202).send({ jobId: job.id });
@@ -244,10 +351,22 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
     const send = (e: unknown) => res.write(`data: ${JSON.stringify(e)}\n\n`);
     const terminal = (t: string) => t === 'done' || t === 'error';
     let unsub = () => {};
-    const end = () => { unsub(); res.end(); };
+    const end = () => {
+      unsub();
+      res.end();
+    };
     let finished = false;
-    unsub = jobs.subscribe(job.id, (e) => { send(e); if (terminal(e.type)) { finished = true; end(); } });
-    for (const e of job.events) { send(e); if (terminal(e.type)) finished = true; }
+    unsub = jobs.subscribe(job.id, (e) => {
+      send(e);
+      if (terminal(e.type)) {
+        finished = true;
+        end();
+      }
+    });
+    for (const e of job.events) {
+      send(e);
+      if (terminal(e.type)) finished = true;
+    }
     if (finished) end();
     req.raw.on('close', () => unsub());
   });
@@ -255,7 +374,9 @@ export async function buildApp(opts: { config: Config; llm?: LLMProvider; webDir
   const webDir = opts.webDir ?? path.join(packageRoot(), 'web', 'dist');
   if (fs.existsSync(webDir)) {
     await app.register(fastifyStatic, { root: webDir });
-    app.setNotFoundHandler((req, reply) => (req.url.startsWith('/api/') ? reply.code(404).send({ error: 'Not found' }) : reply.sendFile('index.html')));
+    app.setNotFoundHandler((req, reply) =>
+      req.url.startsWith('/api/') ? reply.code(404).send({ error: 'Not found' }) : reply.sendFile('index.html'),
+    );
   }
   return app;
 }

@@ -2,16 +2,52 @@ import { describe, it, expect } from 'vitest';
 import { resolveConfig } from '../src/core/config.js';
 import { resolveTargets, buildProjects, artifactPolicy, projectDir } from '../src/core/scale/targets.js';
 import { parseShard, applyShard } from '../src/core/scale/shard.js';
-import { resolveEnvironment, environmentSecrets, publicEnvironments, EnvironmentError } from '../src/core/scale/environments.js';
-import { withDefaultTags, isDestructiveJourney, filterJourneyIds, editTags, normalizeTags, parseTagEdits, applyTagEdits } from '../src/core/scale/tags.js';
+import {
+  resolveEnvironment,
+  environmentSecrets,
+  publicEnvironments,
+  EnvironmentError,
+} from '../src/core/scale/environments.js';
+import {
+  withDefaultTags,
+  isDestructiveJourney,
+  filterJourneyIds,
+  editTags,
+  normalizeTags,
+  parseTagEdits,
+  applyTagEdits,
+} from '../src/core/scale/tags.js';
 import { aggregateByJourney, failuresToHeal } from '../src/core/scale/results.js';
 import { publicError } from '../src/core/credentials.js';
 import type { Journey, TestResult } from '../src/core/types.js';
 
-const cfg = (file: Record<string, unknown> = {}, cli: Record<string, unknown> = {}, env: Record<string, string> = {}) => resolveConfig({ file: file as never, cli: cli as never, env, cwd: '/tmp' });
-const j = (id: string, extra: Partial<Journey> = {}): Journey => ({ id, name: `Journey ${id}`, goal: 'g', priority: 'medium', tags: [], steps: ['open the page'], status: 'selected', ...extra });
-const r = (journeyId: string, status: TestResult['status'], project = 'chromium', extra: Partial<TestResult> = {}): TestResult =>
-  ({ journeyId, file: `tests/${journeyId}.spec.ts`, status, durationMs: 1, screenshots: [], project, browser: 'chromium', ...extra });
+const cfg = (file: Record<string, unknown> = {}, cli: Record<string, unknown> = {}, env: Record<string, string> = {}) =>
+  resolveConfig({ file: file as never, cli: cli as never, env, cwd: '/tmp' });
+const j = (id: string, extra: Partial<Journey> = {}): Journey => ({
+  id,
+  name: `Journey ${id}`,
+  goal: 'g',
+  priority: 'medium',
+  tags: [],
+  steps: ['open the page'],
+  status: 'selected',
+  ...extra,
+});
+const r = (
+  journeyId: string,
+  status: TestResult['status'],
+  project = 'chromium',
+  extra: Partial<TestResult> = {},
+): TestResult => ({
+  journeyId,
+  file: `tests/${journeyId}.spec.ts`,
+  status,
+  durationMs: 1,
+  screenshots: [],
+  project,
+  browser: 'chromium',
+  ...extra,
+});
 
 describe('SPEC-012 config', () => {
   it('defaults keep the previous behaviour', () => {
@@ -38,10 +74,16 @@ describe('SPEC-012 config', () => {
   it('AC-2: unknown browser is rejected; trace/video enums', () => {
     expect(() => cfg({ browsers: ['edge'] })).toThrow(/browsers/);
     expect(() => cfg({ trace: 'sometimes' })).toThrow(/trace/);
-    expect(cfg({ trace: 'on-failure', video: 'retain-on-failure' })).toMatchObject({ trace: 'on-failure', video: 'retain-on-failure' });
+    expect(cfg({ trace: 'on-failure', video: 'retain-on-failure' })).toMatchObject({
+      trace: 'on-failure',
+      video: 'retain-on-failure',
+    });
   });
   it('FR-8: environments + env from AGENTIC_E2E_ENV; CLI wins', () => {
-    const environments = { staging: { baseUrl: 'https://staging.example.com' }, prod: { baseUrl: 'https://example.com' } };
+    const environments = {
+      staging: { baseUrl: 'https://staging.example.com' },
+      prod: { baseUrl: 'https://example.com' },
+    };
     expect(cfg({ environments }, {}, { AGENTIC_E2E_ENV: 'staging' }).env).toBe('staging');
     expect(cfg({ environments }, { env: 'prod' }, { AGENTIC_E2E_ENV: 'staging' }).env).toBe('prod');
     expect(() => cfg({ environments: { bad: { baseUrl: 'ftp://x' } } })).toThrow(/environments/);
@@ -55,22 +97,33 @@ describe('SPEC-012 targets (FR-1..4)', () => {
       { name: 'firefox', browser: 'firefox' },
       { name: 'iPhone 15', browser: 'webkit', device: 'iPhone 15' },
     ]);
-    expect(resolveTargets({ devices: ['Pixel 7'] })).toEqual([{ name: 'Pixel 7', browser: 'chromium', device: 'Pixel 7' }]);
+    expect(resolveTargets({ devices: ['Pixel 7'] })).toEqual([
+      { name: 'Pixel 7', browser: 'chromium', device: 'Pixel 7' },
+    ]);
   });
   it('AC-2: unknown device fails with a suggestion', () => {
     expect(() => resolveTargets({ devices: ['iPhone 99'] })).toThrow(/Unknown device "iPhone 99".*iPhone/);
   });
   it('AC-1: one project per target with the right use', () => {
-    const { projects, projectsFor } = buildProjects({ targets: resolveTargets({ browsers: ['chromium', 'webkit'], devices: ['Pixel 7'] }), ids: ['a', 'b'] });
+    const { projects, projectsFor } = buildProjects({
+      targets: resolveTargets({ browsers: ['chromium', 'webkit'], devices: ['Pixel 7'] }),
+      ids: ['a', 'b'],
+    });
     expect(projects.map((p) => p.name)).toEqual(['chromium', 'webkit', 'Pixel 7']);
     expect(projects[1].use).toMatchObject({ browserName: 'webkit', viewport: { width: 1280, height: 800 } });
     expect(projects[2].use).toMatchObject({ isMobile: true, defaultBrowserType: 'chromium' });
     expect(projectsFor('a')).toEqual(['chromium', 'webkit', 'Pixel 7']);
   });
   it('AC-3: auth splits each target into public and [auth] projects', () => {
-    const { projects, projectsFor, meta } = buildProjects({ targets: resolveTargets({ browsers: ['chromium', 'firefox'] }), ids: ['pub', 'acct'], auth: { storageState: '/s.json', journeyIds: ['acct'] } });
+    const { projects, projectsFor, meta } = buildProjects({
+      targets: resolveTargets({ browsers: ['chromium', 'firefox'] }),
+      ids: ['pub', 'acct'],
+      auth: { storageState: '/s.json', journeyIds: ['acct'] },
+    });
     expect(projects.map((p) => p.name)).toEqual(['chromium', 'chromium [auth]', 'firefox', 'firefox [auth]']);
-    expect(projects.filter((p) => (p.use as { storageState?: string }).storageState === '/s.json').map((p) => p.name)).toEqual(['chromium [auth]', 'firefox [auth]']);
+    expect(
+      projects.filter((p) => (p.use as { storageState?: string }).storageState === '/s.json').map((p) => p.name),
+    ).toEqual(['chromium [auth]', 'firefox [auth]']);
     expect(projectsFor('acct')).toEqual(['chromium [auth]', 'firefox [auth]']);
     expect(projectsFor('pub')).toEqual(['chromium', 'firefox']);
     expect(meta['firefox [auth]']).toMatchObject({ target: { browser: 'firefox' }, auth: true });
@@ -83,7 +136,9 @@ describe('SPEC-012 targets (FR-1..4)', () => {
     expect(artifactPolicy('trace', 'on', true)).toBe('off');
     expect(artifactPolicy('video', 'on', true)).toBe('off');
   });
-  it('project dirs are filesystem-safe slugs', () => { expect(projectDir('iPhone 15 [auth]')).toBe('iphone-15-auth'); });
+  it('project dirs are filesystem-safe slugs', () => {
+    expect(projectDir('iPhone 15 [auth]')).toBe('iphone-15-auth');
+  });
 });
 
 describe('SPEC-012 shard (FR-6, AC-5)', () => {
@@ -105,14 +160,22 @@ describe('SPEC-012 shard (FR-6, AC-5)', () => {
 
 describe('SPEC-012 environments (FR-8..11)', () => {
   const environments = {
-    staging: { baseUrl: 'https://staging.example.com/app', headers: { 'x-env-token': 'Bearer ${STG_TOKEN}', 'x-plain': 'yes' } },
+    staging: {
+      baseUrl: 'https://staging.example.com/app',
+      headers: { 'x-env-token': 'Bearer ${STG_TOKEN}', 'x-plain': 'yes' },
+    },
     prod: { baseUrl: 'https://example.com' },
     Production: { baseUrl: 'https://example.com', readOnly: false },
     dev: { baseUrl: 'http://localhost:3000' },
   };
   it('resolves baseUrl, interpolated headers and readOnly defaults', () => {
     const e = resolveEnvironment({ environments, env: 'staging' }, { STG_TOKEN: 's3cr3t-token' })!;
-    expect(e).toMatchObject({ name: 'staging', baseUrl: 'https://staging.example.com/app', origin: 'https://staging.example.com', readOnly: false });
+    expect(e).toMatchObject({
+      name: 'staging',
+      baseUrl: 'https://staging.example.com/app',
+      origin: 'https://staging.example.com',
+      readOnly: false,
+    });
     expect(e.headers).toEqual({ 'x-env-token': 'Bearer s3cr3t-token', 'x-plain': 'yes' });
     expect(resolveEnvironment({ environments, env: 'prod' }, {})!.readOnly).toBe(true);
     expect(resolveEnvironment({ environments, env: 'Production' }, {})!.readOnly).toBe(false);
@@ -124,7 +187,11 @@ describe('SPEC-012 environments (FR-8..11)', () => {
   });
   it('AC-8: unset variable names the variable for the CLI but not for web clients', () => {
     let err: unknown;
-    try { resolveEnvironment({ environments, env: 'staging' }, {}); } catch (e) { err = e; }
+    try {
+      resolveEnvironment({ environments, env: 'staging' }, {});
+    } catch (e) {
+      err = e;
+    }
     expect(err).toBeInstanceOf(EnvironmentError);
     expect((err as Error).message).toContain('STG_TOKEN');
     expect(publicError(err)).not.toContain('STG_TOKEN');
@@ -134,7 +201,11 @@ describe('SPEC-012 environments (FR-8..11)', () => {
     expect(environmentSecrets(e).map((s) => s.value)).toContain('Bearer s3cr3t-token');
     expect(environmentSecrets(e).map((s) => s.value)).toContain('s3cr3t-token');
     const pub = publicEnvironments(environments);
-    expect(pub.staging).toEqual({ baseUrl: 'https://staging.example.com/app', readOnly: false, headers: ['x-env-token', 'x-plain'] });
+    expect(pub.staging).toEqual({
+      baseUrl: 'https://staging.example.com/app',
+      readOnly: false,
+      headers: ['x-env-token', 'x-plain'],
+    });
     expect(JSON.stringify(pub)).not.toContain('Bearer');
   });
 });
@@ -149,13 +220,21 @@ describe('SPEC-012 tags, destructive, filters (FR-12, 14..16)', () => {
   });
   it('AC-9: destructive = tag, else heuristic; read-only tag overrides', () => {
     expect(isDestructiveJourney(j('buy', { tags: ['destructive'] }))).toBe(true);
-    expect(isDestructiveJourney(j('delete-account', { name: 'Delete account', steps: ['open settings', 'click Delete account'] }))).toBe(true);
+    expect(
+      isDestructiveJourney(
+        j('delete-account', { name: 'Delete account', steps: ['open settings', 'click Delete account'] }),
+      ),
+    ).toBe(true);
     expect(isDestructiveJourney(j('checkout', { name: 'Checkout', goal: 'Place an order and pay' }))).toBe(true);
     expect(isDestructiveJourney(j('browse', { name: 'Browse products', goal: 'See the catalogue' }))).toBe(false);
     expect(isDestructiveJourney(j('rm', { name: 'Remove item from cart', tags: ['read-only'] }))).toBe(false);
   });
   it('AC-12: grep (substring or /regex/) and tag (any) filters', () => {
-    const js = [j('a', { tags: ['smoke'] }), j('checkout', { name: 'Checkout flow', tags: ['regression'] }), j('c', { tags: ['regression', 'critical'] })];
+    const js = [
+      j('a', { tags: ['smoke'] }),
+      j('checkout', { name: 'Checkout flow', tags: ['regression'] }),
+      j('c', { tags: ['regression', 'critical'] }),
+    ];
     const ids = ['a', 'checkout', 'c', 'orphan'];
     expect(filterJourneyIds(ids, js, { tag: ['smoke'] })).toEqual(['a']);
     expect(filterJourneyIds(ids, js, { tag: ['critical', 'smoke'] })).toEqual(['a', 'c']);
@@ -176,12 +255,17 @@ describe('SPEC-012 tags, destructive, filters (FR-12, 14..16)', () => {
 
 describe('SPEC-012 journeys tag edits (FR-15)', () => {
   it('parses id=tag,tag pairs', () => {
-    expect(parseTagEdits(['a=x, y', '*=z'])).toEqual([{ id: 'a', tags: ['x', 'y'] }, { id: '*', tags: ['z'] }]);
+    expect(parseTagEdits(['a=x, y', '*=z'])).toEqual([
+      { id: 'a', tags: ['x', 'y'] },
+      { id: '*', tags: ['z'] },
+    ]);
     for (const bad of ['nonsense', '=x', 'a=']) expect(() => parseTagEdits([bad])).toThrow(/id=tag/);
   });
   it('applies set, then add, then remove; validates before changing anything', () => {
     const js = [j('a', { tags: ['regression'] }), j('b', { tags: ['smoke'] })];
-    expect(applyTagEdits(js, { set: ['*=smoke'], add: ['a=critical'], remove: ['b=smoke'] }).map((x) => x.tags)).toEqual([['smoke', 'critical'], []]);
+    expect(
+      applyTagEdits(js, { set: ['*=smoke'], add: ['a=critical'], remove: ['b=smoke'] }).map((x) => x.tags),
+    ).toEqual([['smoke', 'critical'], []]);
     expect(() => applyTagEdits(js, { add: ['a=ok', 'zz=x'] })).toThrow(/Unknown journey id.*zz/);
     expect(js[0].tags).toEqual(['regression']);
   });
@@ -189,9 +273,17 @@ describe('SPEC-012 journeys tag edits (FR-15)', () => {
 
 describe('SPEC-012 results (FR-22)', () => {
   it('AC-16: one entry per journey, failed if any project failed', () => {
-    const results = [r('x', 'passed', 'chromium'), r('x', 'failed', 'firefox', { error: 'boom' }), r('y', 'passed', 'chromium'), r('y', 'passed', 'firefox')];
+    const results = [
+      r('x', 'passed', 'chromium'),
+      r('x', 'failed', 'firefox', { error: 'boom' }),
+      r('y', 'passed', 'chromium'),
+      r('y', 'passed', 'firefox'),
+    ];
     const agg = aggregateByJourney(results);
-    expect(agg.map((a) => [a.journeyId, a.status, a.project])).toEqual([['x', 'failed', 'firefox'], ['y', 'passed', 'chromium']]);
+    expect(agg.map((a) => [a.journeyId, a.status, a.project])).toEqual([
+      ['x', 'failed', 'firefox'],
+      ['y', 'passed', 'chromium'],
+    ]);
     expect(failuresToHeal(results).map((f) => [f.journeyId, f.project])).toEqual([['x', 'firefox']]);
     expect(failuresToHeal([r('x', 'timedOut', 'a'), r('x', 'failed', 'b')])).toHaveLength(1);
   });

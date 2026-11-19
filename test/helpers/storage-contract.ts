@@ -5,11 +5,18 @@ import { InvalidKeyError, type StorageBackend } from '../../src/core/storage/bac
  * SPEC-014 FR-23: the behaviour every StorageBackend must have. A new backend (S3, …) is done when
  * `describeStorageContract('s3', () => …)` passes.
  */
-export function describeStorageContract(name: string, factory: () => Promise<{ backend: StorageBackend; cleanup?: () => Promise<void> }>) {
+export function describeStorageContract(
+  name: string,
+  factory: () => Promise<{ backend: StorageBackend; cleanup?: () => Promise<void> }>,
+) {
   describe(`StorageBackend contract: ${name}`, () => {
     let b: StorageBackend, cleanup: (() => Promise<void>) | undefined;
-    beforeEach(async () => { ({ backend: b, cleanup } = await factory()); });
-    afterEach(async () => { await cleanup?.(); });
+    beforeEach(async () => {
+      ({ backend: b, cleanup } = await factory());
+    });
+    afterEach(async () => {
+      await cleanup?.();
+    });
 
     it('round-trips text and binary data', async () => {
       await b.write('sites/a/site.json', '{"id":"a"}');

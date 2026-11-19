@@ -1,7 +1,10 @@
 import { LLMBudgetError, type LLMTokenUsage } from './types.js';
 
 /** SPEC-013 FR-14: per-run limits (one CLI command / web job). */
-export interface LLMBudget { maxCostPerRun?: number; maxTokensPerRun?: number }
+export interface LLMBudget {
+  maxCostPerRun?: number;
+  maxTokensPerRun?: number;
+}
 
 export interface LLMCallRecord extends LLMTokenUsage {
   n: number;
@@ -23,9 +26,18 @@ export interface LLMCallRecord extends LLMTokenUsage {
 }
 
 export interface UsageTotals {
-  calls: number; failed: number; cached: number; retries: number;
-  inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number; totalTokens: number;
-  costUsd: number; unpricedCalls: number; latencyMs: number;
+  calls: number;
+  failed: number;
+  cached: number;
+  retries: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  totalTokens: number;
+  costUsd: number;
+  unpricedCalls: number;
+  latencyMs: number;
 }
 
 export const tokensOf = (u: LLMTokenUsage) => u.inputTokens + u.outputTokens + u.cacheReadTokens + u.cacheWriteTokens;
@@ -33,7 +45,20 @@ const fmtInt = (n: number) => n.toLocaleString('en-US');
 const fmtUsd = (n: number) => `$${n.toFixed(4)}`;
 
 export function emptyTotals(): UsageTotals {
-  return { calls: 0, failed: 0, cached: 0, retries: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, totalTokens: 0, costUsd: 0, unpricedCalls: 0, latencyMs: 0 };
+  return {
+    calls: 0,
+    failed: 0,
+    cached: 0,
+    retries: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 0,
+    costUsd: 0,
+    unpricedCalls: 0,
+    latencyMs: 0,
+  };
 }
 
 export function addTotals(a: UsageTotals, b: UsageTotals): UsageTotals {
@@ -63,12 +88,16 @@ export class UsageTracker {
     this.calls.push(rec);
     if (rec.costUsd === undefined && !rec.cached && this.budget.maxCostPerRun !== undefined && !this.warnedUnpriced) {
       this.warnedUnpriced = true;
-      this.onWarn(`No pricing for model "${rec.model}": llmBudget.maxCostPerRun cannot be enforced for its calls (maxTokensPerRun still applies)`);
+      this.onWarn(
+        `No pricing for model "${rec.model}": llmBudget.maxCostPerRun cannot be enforced for its calls (maxTokensPerRun still applies)`,
+      );
     }
     return rec;
   }
 
-  totals(): UsageTotals { return summarizeCalls(this.calls); }
+  totals(): UsageTotals {
+    return summarizeCalls(this.calls);
+  }
 
   /** FR-15: before a call, refuse when a limit is already reached; after a call, throw when one is exceeded. */
   check(phase: 'before' | 'after'): void {
@@ -84,9 +113,14 @@ export function summarizeCalls(calls: readonly LLMCallRecord[]): UsageTotals {
     if (!c.ok) t.failed++;
     if (c.cached) t.cached++;
     t.retries += c.retries;
-    t.inputTokens += c.inputTokens; t.outputTokens += c.outputTokens; t.cacheReadTokens += c.cacheReadTokens; t.cacheWriteTokens += c.cacheWriteTokens;
+    t.inputTokens += c.inputTokens;
+    t.outputTokens += c.outputTokens;
+    t.cacheReadTokens += c.cacheReadTokens;
+    t.cacheWriteTokens += c.cacheWriteTokens;
     t.latencyMs += c.latencyMs;
-    if (c.costUsd === undefined) { if (!c.cached) t.unpricedCalls++; } else t.costUsd += c.costUsd;
+    if (c.costUsd === undefined) {
+      if (!c.cached) t.unpricedCalls++;
+    } else t.costUsd += c.costUsd;
   }
   t.totalTokens = t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheWriteTokens;
   return t;
@@ -98,9 +132,13 @@ function checkBudget(budget: LLMBudget, t: UsageTotals, phase: 'before' | 'after
   const over = (spent: number, max: number) => (phase === 'before' ? spent >= max : spent > max);
   const tail = `after ${t.calls} call${t.calls === 1 ? '' : 's'}; LLM work stopped.`;
   if (maxCostPerRun !== undefined && over(t.costUsd, maxCostPerRun)) {
-    throw new LLMBudgetError(`LLM budget exceeded: estimated cost ${fmtUsd(t.costUsd)} ${phase === 'before' ? 'reached' : 'exceeds'} llmBudget.maxCostPerRun ${fmtUsd(maxCostPerRun)} ${tail} Raise llmBudget.maxCostPerRun (--max-cost) or narrow the run (--max-journeys, --include).`);
+    throw new LLMBudgetError(
+      `LLM budget exceeded: estimated cost ${fmtUsd(t.costUsd)} ${phase === 'before' ? 'reached' : 'exceeds'} llmBudget.maxCostPerRun ${fmtUsd(maxCostPerRun)} ${tail} Raise llmBudget.maxCostPerRun (--max-cost) or narrow the run (--max-journeys, --include).`,
+    );
   }
   if (maxTokensPerRun !== undefined && over(t.totalTokens, maxTokensPerRun)) {
-    throw new LLMBudgetError(`LLM budget exceeded: ${fmtInt(t.totalTokens)} tokens ${phase === 'before' ? 'reached' : 'exceed'} llmBudget.maxTokensPerRun ${fmtInt(maxTokensPerRun)} ${tail} Raise llmBudget.maxTokensPerRun (--max-tokens-per-run) or narrow the run (--max-journeys, --include).`);
+    throw new LLMBudgetError(
+      `LLM budget exceeded: ${fmtInt(t.totalTokens)} tokens ${phase === 'before' ? 'reached' : 'exceed'} llmBudget.maxTokensPerRun ${fmtInt(maxTokensPerRun)} ${tail} Raise llmBudget.maxTokensPerRun (--max-tokens-per-run) or narrow the run (--max-journeys, --include).`,
+    );
   }
 }

@@ -14,7 +14,19 @@ function dockerIgnored(rules: string[], file: string): boolean {
   for (const raw of rules) {
     const neg = raw.startsWith('!');
     const pat = (neg ? raw.slice(1) : raw).replace(/\/$/, '');
-    const re = new RegExp('^' + pat.split('**').map((s) => s.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')).join('.*') + '(/.*)?$');
+    const re = new RegExp(
+      '^' +
+        pat
+          .split('**')
+          .map((s) =>
+            s
+              .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+              .replace(/\*/g, '[^/]*')
+              .replace(/\?/g, '[^/]'),
+          )
+          .join('.*') +
+        '(/.*)?$',
+    );
     if (re.test(file)) ignored = !neg;
   }
   return ignored;
@@ -40,11 +52,35 @@ describe('SPEC-014 container files', () => {
   });
 
   it('AC-28: .dockerignore keeps data and secrets out of the build context', () => {
-    const rules = read('.dockerignore').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-    for (const f of ['data/sites/x/site.json', '.agentic-e2e/credentials.json', 'credentials.json', 'credentials.prod.json', 'staging.credentials.json', 'tokens.json', 'tokens.prod.json', '.env', '.env.production', 'node_modules/x/index.js', '.git/HEAD', 'dist/cli/index.js', 'web/dist/index.html']) {
+    const rules = read('.dockerignore')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+    for (const f of [
+      'data/sites/x/site.json',
+      '.agentic-e2e/credentials.json',
+      'credentials.json',
+      'credentials.prod.json',
+      'staging.credentials.json',
+      'tokens.json',
+      'tokens.prod.json',
+      '.env',
+      '.env.production',
+      'node_modules/x/index.js',
+      '.git/HEAD',
+      'dist/cli/index.js',
+      'web/dist/index.html',
+    ]) {
       expect(dockerIgnored(rules, f), f).toBe(true);
     }
-    for (const f of ['credentials.example.json', '.env.example', 'src/cli/index.ts', 'package.json', 'pnpm-lock.yaml', 'web/src/App.tsx']) {
+    for (const f of [
+      'credentials.example.json',
+      '.env.example',
+      'src/cli/index.ts',
+      'package.json',
+      'pnpm-lock.yaml',
+      'web/src/App.tsx',
+    ]) {
       expect(dockerIgnored(rules, f), f).toBe(false);
     }
   });
@@ -63,7 +99,8 @@ describe('SPEC-014 container files', () => {
   });
 
   it('gitignore also covers tokens files and .env', () => {
-    const ignored = (p: string) => spawnSync('git', ['check-ignore', '-q', '--no-index', p], { cwd: root }).status === 0;
+    const ignored = (p: string) =>
+      spawnSync('git', ['check-ignore', '-q', '--no-index', p], { cwd: root }).status === 0;
     expect(ignored('tokens.json')).toBe(true);
     expect(ignored('.agentic-e2e/tokens.json')).toBe(true);
     expect(ignored('.env')).toBe(true);

@@ -20,9 +20,29 @@ export interface LLMFactoryDeps {
 }
 
 /** Builds the configured provider. Throws on missing credentials/region (nothing is called over the network). */
-export function createLLMProvider(config: Pick<Config, 'provider' | 'model' | 'maxTokens' | 'awsRegion' | 'awsProfile'> & Partial<Pick<Config, 'promptCaching' | 'llmTimeoutMs'>>, deps: LLMFactoryDeps = {}): AnthropicProvider & LLMProvider {
+export function createLLMProvider(
+  config: Pick<Config, 'provider' | 'model' | 'maxTokens' | 'awsRegion' | 'awsProfile'> &
+    Partial<Pick<Config, 'promptCaching' | 'llmTimeoutMs'>>,
+  deps: LLMFactoryDeps = {},
+): AnthropicProvider & LLMProvider {
   if (config.provider === 'bedrock') {
-    return createBedrockProvider({ model: config.model, maxTokens: config.maxTokens, awsRegion: config.awsRegion, awsProfile: config.awsProfile, promptCaching: config.promptCaching, timeoutMs: config.llmTimeoutMs, env: deps.env, createClient: deps.createBedrockClient });
+    return createBedrockProvider({
+      model: config.model,
+      maxTokens: config.maxTokens,
+      awsRegion: config.awsRegion,
+      awsProfile: config.awsProfile,
+      promptCaching: config.promptCaching,
+      timeoutMs: config.llmTimeoutMs,
+      env: deps.env,
+      createClient: deps.createBedrockClient,
+    });
   }
-  return new AnthropicProvider({ provider: 'anthropic', model: config.model, maxTokens: config.maxTokens, promptCaching: config.promptCaching, timeoutMs: config.llmTimeoutMs, apiKey: deps.apiKey });
+  return new AnthropicProvider({
+    provider: 'anthropic',
+    model: config.model,
+    maxTokens: config.maxTokens,
+    promptCaching: config.promptCaching,
+    timeoutMs: config.llmTimeoutMs,
+    apiKey: deps.apiKey,
+  });
 }

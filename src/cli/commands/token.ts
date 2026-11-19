@@ -2,7 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Command } from 'commander';
 import { isRole, ROLES } from '../../core/security/roles.js';
-import { generateToken, hashToken, parseTokensFile, readTokensFileRaw, TOKEN_NAME_RE, TokenError, type TokenEntry } from '../../core/security/tokens.js';
+import {
+  generateToken,
+  hashToken,
+  parseTokensFile,
+  readTokensFileRaw,
+  TOKEN_NAME_RE,
+  TokenError,
+  type TokenEntry,
+} from '../../core/security/tokens.js';
 
 function readEntries(file: string): TokenEntry[] {
   return fs.existsSync(file) ? parseTokensFile(readTokensFileRaw(file), path.basename(file)) : [];
@@ -19,7 +27,9 @@ function writeEntries(file: string, entries: TokenEntry[]) {
 export function registerTokenCommands(program: Command) {
   const tok = program.command('token').description('manage API tokens for `serve` (only hashes are stored)');
 
-  tok.command('create').description('create a token; prints it once (store it in your password manager / CI secret)')
+  tok
+    .command('create')
+    .description('create a token; prints it once (store it in your password manager / CI secret)')
     .requiredOption('--name <name>', 'who/what uses the token, e.g. ci or alice')
     .requiredOption('--role <role>', `one of ${ROLES.join(', ')}`)
     .option('--file <tokens.json>', 'append the hashed entry to this tokens file (created 0600)')
@@ -31,7 +41,10 @@ export function registerTokenCommands(program: Command) {
       if (o.file) {
         const file = path.resolve(o.file);
         const entries = readEntries(file);
-        if (entries.some((e) => e.name === o.name)) throw new TokenError(`A token named "${o.name}" already exists in ${path.basename(file)}; remove it first to rotate`);
+        if (entries.some((e) => e.name === o.name))
+          throw new TokenError(
+            `A token named "${o.name}" already exists in ${path.basename(file)}; remove it first to rotate`,
+          );
         writeEntries(file, [...entries, entry]);
         console.log(`Added token "${o.name}" (${o.role}) to ${file}`);
       } else {
@@ -39,10 +52,14 @@ export function registerTokenCommands(program: Command) {
         console.log(`  AGENTIC_E2E_API_TOKENS=${o.name}:${o.role}:${entry.hash}`);
         console.log('  (separate several entries with commas)');
       }
-      console.log(`\nToken (shown once; send it as "Authorization: Bearer <token>" or paste it into the web UI):\n  ${token}`);
+      console.log(
+        `\nToken (shown once; send it as "Authorization: Bearer <token>" or paste it into the web UI):\n  ${token}`,
+      );
     });
 
-  tok.command('hash').description('read a token on stdin and print its hash (for AGENTIC_E2E_API_TOKENS / a tokens file)')
+  tok
+    .command('hash')
+    .description('read a token on stdin and print its hash (for AGENTIC_E2E_API_TOKENS / a tokens file)')
     .action(async () => {
       const chunks: Buffer[] = [];
       for await (const c of process.stdin) chunks.push(Buffer.from(c as Buffer));
@@ -51,7 +68,9 @@ export function registerTokenCommands(program: Command) {
       console.log(hashToken(token));
     });
 
-  tok.command('list').description('list token names and roles in a tokens file (never hashes)')
+  tok
+    .command('list')
+    .description('list token names and roles in a tokens file (never hashes)')
     .requiredOption('--file <tokens.json>', 'tokens file')
     .action((o: { file: string }) => {
       const entries = readEntries(path.resolve(o.file));
